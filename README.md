@@ -9,3 +9,5 @@ Juego de mesa de franquicias NBA para jugar con amigos: en un solo móvil o en v
 Stack: Vite + React, Supabase (tabla `fq_rooms`, funciones `fq_create_room` y `fq_update_room`), Vercel.
 
 Pruebas: `node scripts/unit.mjs` (reglas) y `node scripts/sim.mjs 300` (partidas completas con bots).
+
+En vivo: https://franquicia-nba.vercel.app
