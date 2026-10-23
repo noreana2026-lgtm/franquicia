@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { SQ, GROUPS } from '../game/data.js';
+import { GROUPS, sqOf } from '../game/data.js';
 import { money } from '../game/engine.js';
 
 export const M = ({ v, className = '' }) => <span className={'money ' + className}>{money(v)}</span>;
@@ -47,7 +47,7 @@ export function Stepper({ value, set, step = 10, min = 0, max = 99999, suffix = 
 export const Dot = ({ col, size = 10 }) => <i className="pdot" style={{ background: col, width: size, height: size }} />;
 
 export function PropTag({ sq, G, onClick, on, sub }) {
-  const s = SQ[sq]; const p = G?.props?.[sq];
+  const s = sqOf(G, sq); const p = G?.props?.[sq];
   const col = s.g ? GROUPS[s.g].c : '#c9ced8';
   const Tag = onClick ? 'button' : 'span';
   return (

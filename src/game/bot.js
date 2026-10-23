@@ -1,6 +1,6 @@
 // Bots y piloto automático (jugadores ausentes). Devuelven la siguiente acción a ejecutar o null.
 import { SQ, groupSqs, GROUPS } from './data.js';
-import { pk, isP, oNum, alive, rentOf, buildErr, sellErr, mortErr, unmortCost, houseCost, uteOpErr, getUte, hasGroup } from './engine.js';
+import { pk, isP, oNum, alive, rentOf, buildErr, sellErr, mortErr, unmortCost, houseCost, uteOpErr, getUte, hasGroup, transferErr } from './engine.js';
 
 export const isAuto = (G, i) => !!(G.players[i] && !G.players[i].bankrupt && (G.players[i].bot || G.players[i].away));
 
@@ -42,9 +42,16 @@ function acceptProposal(G, pr, q) {
     case 'trade': {
       const mineIsA = d.a === q;
       const give = mineIsA ? d.ga : d.gb; const get = mineIsA ? d.gb : d.ga; const other = mineIsA ? d.b : d.a;
-      const vGive = (give.props || []).reduce((a, sq) => a + val(G, sq, other), 0) + (+give.cash || 0) + (+give.jf || 0) * 50;
-      const vGet = (get.props || []).reduce((a, sq) => a + val(G, sq, q), 0) + (+get.cash || 0) + (+get.jf || 0) * 50;
-      return vGet >= vGive * 1.1 && P.cash - (+give.cash || 0) >= 50;
+      const price = (sq) => (G.props[sq]?.mort ? SQ[sq].price / 2 : SQ[sq].price);
+      const gain = (get.props || []).reduce((a, sq) => a + price(sq) * synergy(G, q, sq), 0) + (+get.cash || 0) + (+get.jf || 0) * 50;
+      const loss = (give.props || []).reduce((a, sq) => {
+        let v = price(sq);
+        if (synergy(G, other, sq) >= 2) v += 0.6 * SQ[sq].price; // completa el grupo del rival
+        const s = SQ[sq];
+        if (s.t === 'team' && groupSqs(s.g).every((j) => G.props[j]?.o === pk(q))) v += 1.5 * SQ[sq].price; // rompe mi grupo
+        return a + v;
+      }, 0) + (+give.cash || 0) + (+give.jf || 0) * 50;
+      return gain >= loss && P.cash - (+give.cash || 0) >= 50;
     }
     case 'ute': {
       let tot = 0; let mine = 0;
@@ -120,7 +127,33 @@ function turnAction(G, i) {
         if (!uteOpErr(G, u, { k: 'build', sq }) && u.members.every((m) => G.players[m.p].cash > 300 || u.caja > houseCost(sq))) return { t: 'ute_op', by: i, uid: u.id, op: { k: 'build', sq } };
       }
     }
+    const tp = G.settings.contracts ? botTradeProposal(G, i) : null;
+    if (tp) return tp;
     return { t: 'end_turn', by: i };
+  }
+  return null;
+}
+
+// Un bot propone traspasos para completar grupos: intercambio de piezas si le sirve al otro, o dinero.
+function botTradeProposal(G, i) {
+  if (G.proposals.some((p) => p.by === i)) return null;
+  const P = G.players[i]; const asked = G.botAsk || {};
+  for (const g of Object.keys(GROUPS)) {
+    const gs = groupSqs(g);
+    const mine = gs.filter((j) => G.props[j]?.o === pk(i));
+    const miss = gs.filter((j) => G.props[j]?.o !== pk(i));
+    if (!mine.length || miss.length !== 1) continue;
+    const sq = miss[0]; const o = G.props[sq]?.o;
+    if (!o || !isP(o)) continue;
+    const x = oNum(o);
+    if (G.players[x].bankrupt || transferErr(G, o, sq)) continue;
+    const key = `${i}-${sq}`;
+    if (asked[key] && G.round - asked[key] < 6) continue;
+    // ¿tengo una pieza que le complete un grupo a él?
+    const swap = Object.keys(G.props).map(Number).find((k) => G.props[k].o === pk(i) && SQ[k].t === 'team' && SQ[k].g !== g && synergy(G, x, k) >= 2 && !transferErr(G, pk(i), k));
+    if (swap != null) return { t: 'propose', by: i, kind: 'trade', ask: key, data: { a: i, b: x, ga: { props: [swap], cash: 0, jf: 0 }, gb: { props: [sq], cash: 0, jf: 0 } } };
+    const offer = Math.round((SQ[sq].price * 1.7) / 10) * 10;
+    if (P.cash - offer >= 250) return { t: 'propose', by: i, kind: 'trade', ask: key, data: { a: i, b: x, ga: { props: [], cash: offer, jf: 0 }, gb: { props: [sq], cash: 0, jf: 0 } } };
   }
   return null;
 }

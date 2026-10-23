@@ -92,7 +92,7 @@ for (let g = 0; g < N; g++) {
   const n = 2 + ri(5);
   const ruleset = pick(['clasicas', 'caseras', 'personal']);
   const rules = {}; Object.keys(RULESETS.clasicas).forEach((k) => { rules[k] = rnd() < 0.5; });
-  const settings = { mode: pick(['rapida', 'estandar']), contracts: true, build: pick(['infra', 'plantilla']), ruleset, rules, maxRounds: pick([0, 30, 60]) };
+  const settings = { board: pick(['liga', 'franquicia']), mode: pick(['rapida', 'estandar']), contracts: true, build: pick(['infra', 'plantilla']), ruleset, rules, maxRounds: pick([0, 30, 60]) };
   if (!settings.maxRounds && settings.mode === 'estandar') settings.maxRounds = 120;
   let G = newLocalGame(settings, Array.from({ length: n }, (_, i) => ({ name: 'B' + i, bot: true })));
   let steps = 0; let extended = 0; let lastSig = ''; let same = 0;

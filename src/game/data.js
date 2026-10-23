@@ -132,12 +132,12 @@ export const RULE_INFO = {
   doubleGo: { n: 'Draft doble', d: 'Si caes justo en la Noche del Draft cobras el doble.' },
   evenBuild: { n: 'Construcción pareja', d: 'Hay que mejorar las franquicias de un grupo de forma uniforme: ninguna puede sacar más de un nivel a otra.' },
   bankLimit: { n: 'Límite de la liga', d: 'Solo existen 32 mejoras intermedias y 12 de nivel máximo. Si se agotan, nadie más construye.' },
-  jailRent: { n: 'Cobrar sancionado', d: 'Si estás en sanción sigues cobrando alquileres. Desactivado: el sancionado no cobra.' },
+  jailRent: { n: 'Cobrar desde la sanción', d: 'Si estás en sanción (o en la enfermería) sigues cobrando. Desactivado: no cobras hasta salir.' },
 };
 
 export const MODES = {
-  rapida: { n: 'Rápida', d: 'Cada jugador empieza con 2 franquicias al azar y la partida tiene un número de rondas. Al llegar al final podéis ampliarla o cerrarla: gana el mayor patrimonio.' },
-  estandar: { n: 'Estándar', d: 'Partida clásica: compra, construye y arruina a los demás. Puedes poner un límite de rondas opcional.' },
+  rapida: { n: 'Rápida', d: 'Cada uno empieza con 3 casillas al azar y la partida dura 20 rondas. Al llegar al final podéis ampliarla o cerrarla. Gana la mejor valoración.' },
+  estandar: { n: 'Estándar', d: 'Partida clásica: gana el último que quede sin quebrar. Si ponéis límite de rondas, gana la mejor valoración al llegar.' },
 };
 
 // ---------- Contratos ----------
@@ -259,3 +259,127 @@ export const CONTRACTS = {
 };
 
 export const CONTRACT_ORDER = ['ute', 'trade', 'loan', 'discount', 'cession', 'option', 'installment'];
+
+// ---------- Tablero «Franquicia»: las casillas son jugadores y cada uno dirige una franquicia ----------
+// 15 jugadores actuales y 7 históricos, ordenados por palmarés y legado (de menos a más). Orden orientativo.
+const PLAYERS = {
+  1: ['CUN', 'Cade Cunningham', 'Actual · base'],
+  3: ['EDW', 'Anthony Edwards', 'Actual · escolta'],
+  6: ['WEM', 'Victor Wembanyama', 'Actual · pívot'],
+  8: ['MIT', 'Donovan Mitchell', 'Actual · escolta'],
+  9: ['BRU', 'Jalen Brunson', 'Actual · base'],
+  11: ['BOO', 'Devin Booker', 'Actual · escolta'],
+  13: ['EMB', 'Joel Embiid', 'Actual · pívot · MVP'],
+  14: ['TAT', 'Jayson Tatum', 'Actual · alero · campeón'],
+  16: ['DON', 'Luka Dončić', 'Actual · base'],
+  18: ['SGA', 'Shai Gilgeous-Alexander', 'Actual · base · MVP y campeón'],
+  19: ['GIA', 'Giannis Antetokounmpo', 'Actual · ala-pívot · 2 MVP'],
+  21: ['DUR', 'Kevin Durant', 'Actual · alero · 2 anillos'],
+  23: ['JOK', 'Nikola Jokić', 'Actual · pívot · 3 MVP'],
+  24: ['CUR', 'Stephen Curry', 'Actual · base · 4 anillos'],
+  26: ['DUN', 'Tim Duncan', 'Histórico · 5 anillos'],
+  27: ['SHQ', "Shaquille O'Neal", 'Histórico · 4 anillos'],
+  29: ['BIR', 'Larry Bird', 'Histórico · 3 MVP'],
+  31: ['MAG', 'Magic Johnson', 'Histórico · 5 anillos'],
+  32: ['KOB', 'Kobe Bryant', 'Histórico · 5 anillos'],
+  34: ['KAR', 'Kareem Abdul-Jabbar', 'Histórico · 6 MVP'],
+  37: ['LBJ', 'LeBron James', 'Actual · 4 anillos · máximo anotador'],
+  39: ['MJ', 'Michael Jordan', 'Histórico · 6 anillos'],
+};
+const F_OTHER = {
+  0: { n: 'Inicio de temporada', s: 'Cobra al pasar' },
+  4: { n: 'Impuesto de lujo' },
+  5: { ab: 'HC', n: 'Entrenador jefe' },
+  10: { n: 'Enfermería', s: 'Solo de visita' },
+  12: { ab: 'ZAP', n: 'Zapatilla propia' },
+  15: { ab: 'FIS', n: 'Preparación física' },
+  20: { n: 'All-Star Weekend', s: 'Bote de multas' },
+  25: { ab: 'DAT', n: 'Analítica avanzada' },
+  28: { ab: 'GAM', n: 'Videojuego oficial' },
+  30: { n: 'Lesión', s: 'A la enfermería' },
+  35: { ab: 'SCT', n: 'Red de ojeadores' },
+};
+
+export const BOARDS = {
+  liga: {
+    n: 'Tablero liga',
+    d: 'Las casillas son franquicias NBA: compras equipos y te haces con la liga. Gana el mayor patrimonio o el último en pie.',
+    groupNames: Object.fromEntries(Object.entries(GROUPS).map(([k, v]) => [k, v.n])),
+    tvName: 'Derechos de TV', utilName: 'Patrocinios',
+    jail: 'sanción', jailed: 'sancionado', ownWord: 'franquicia', ownWordPl: 'franquicias',
+    icon: { go: 'DRAFT', jail: 'SANCIÓN', pot: 'ALL-STAR', gojail: 'EXPULSADO', td: 'TRADE', fo: 'FRONT', tax: 'MULTA' },
+  },
+  franquicia: {
+    n: 'Tablero franquicia',
+    d: 'Cada uno dirige una franquicia y las casillas son jugadores: los fichas, los haces crecer hasta el anillo y gana la franquicia mejor valorada.',
+    groupNames: { g1: 'Jóvenes estrellas', g2: 'En ascenso', g3: 'All-Stars', g4: 'Nueva ola', g5: 'Generacionales', g6: 'Salón de la Fama', g7: 'Leyendas', g8: 'Los GOAT' },
+    tvName: 'Cuerpo técnico', utilName: 'Patrocinios',
+    jail: 'enfermería', jailed: 'lesionado', ownWord: 'jugador', ownWordPl: 'jugadores',
+    icon: { go: 'INICIO', jail: 'ENFERM.', pot: 'ALL-STAR', gojail: 'LESIÓN', td: 'TRADE', fo: 'FRONT', tax: 'MULTA' },
+  },
+};
+
+const BOARD_CACHE = {};
+export function boardSQ(board) {
+  const b = board === 'franquicia' ? 'franquicia' : 'liga';
+  if (BOARD_CACHE[b]) return BOARD_CACHE[b];
+  BOARD_CACHE[b] = b === 'liga' ? SQ : SQ.map((s) => {
+    if (PLAYERS[s.i]) { const [ab, n, sub] = PLAYERS[s.i]; return { ...s, ab, n, city: '', sub }; }
+    return F_OTHER[s.i] ? { ...s, ...F_OTHER[s.i] } : s;
+  });
+  return BOARD_CACHE[b];
+}
+export const boardOf = (settings) => BOARDS[settings?.board === 'franquicia' ? 'franquicia' : 'liga'];
+export const sqOf = (G, i) => boardSQ(G?.settings?.board)[i];
+export const groupName = (G, g) => boardOf(G?.settings).groupNames[g] || '';
+
+BUILD_SETS.jugador = {
+  n: 'Progresión',
+  d: 'Cada jugador crece contigo: de titular a campeón.',
+  lv: ['Sin progresión', 'Titular', 'All-Star', 'All-NBA', 'MVP', 'Anillo'],
+  sh: ['', 'TIT', 'ASG', 'ALL', 'MVP', 'ANI'],
+};
+export const buildSet = (settings) => BUILD_SETS[settings?.board === 'franquicia' ? 'jugador' : (settings?.build || 'infra')];
+
+// Bonus de valoración en el tablero franquicia
+export const SCORE = { group: 150, ring: 100 };
+
+// Las 30 franquicias para elegir en el tablero franquicia
+export const NBA_TEAMS = [
+  ['ATL', 'Hawks', '#e03a3e'], ['BOS', 'Celtics', '#007a33'], ['BKN', 'Nets', '#777777'], ['CHA', 'Hornets', '#00788c'], ['CHI', 'Bulls', '#ce1141'],
+  ['CLE', 'Cavaliers', '#860038'], ['DAL', 'Mavericks', '#00538c'], ['DEN', 'Nuggets', '#fec524'], ['DET', 'Pistons', '#c8102e'], ['GSW', 'Warriors', '#1d428a'],
+  ['HOU', 'Rockets', '#ce1141'], ['IND', 'Pacers', '#fdbb30'], ['LAC', 'Clippers', '#c8102e'], ['LAL', 'Lakers', '#552583'], ['MEM', 'Grizzlies', '#5d76a9'],
+  ['MIA', 'Heat', '#98002e'], ['MIL', 'Bucks', '#00471b'], ['MIN', 'Timberwolves', '#236192'], ['NOP', 'Pelicans', '#85714d'], ['NYK', 'Knicks', '#f58426'],
+  ['OKC', 'Thunder', '#007ac1'], ['ORL', 'Magic', '#0077c0'], ['PHI', '76ers', '#006bb6'], ['PHX', 'Suns', '#e56020'], ['POR', 'Trail Blazers', '#e03a3e'],
+  ['SAC', 'Kings', '#5a2d81'], ['SAS', 'Spurs', '#c4ced4'], ['TOR', 'Raptors', '#ce1141'], ['UTA', 'Jazz', '#753bbd'], ['WAS', 'Wizards', '#002b5c'],
+];
+export const teamName = (code) => NBA_TEAMS.find((t) => t[0] === code)?.[1] || '';
+
+// Cartas: textos que cambian en el tablero franquicia
+const F_CARDS = {
+  td: {
+    0: { n: 'Arranca la temporada', tx: 'Avanza hasta el Inicio de temporada y cobra.' },
+    1: { n: 'Reunión con Jordan', tx: 'Avanza hasta Michael Jordan. Si pasas por el Inicio de temporada, cobras.' },
+    2: { n: 'Visita a Kareem', tx: 'Avanza hasta Kareem Abdul-Jabbar. Si pasas por el Inicio de temporada, cobras.' },
+    3: { n: 'Duelo con Durant', tx: 'Avanza hasta Kevin Durant. Si pasas por el Inicio de temporada, cobras.' },
+    4: { n: 'Cambio de entrenador', tx: 'Avanza a la siguiente casilla del cuerpo técnico. Si tiene dueño, le pagas el doble.' },
+    5: { n: 'Fichaje del staff', tx: 'Avanza a la siguiente casilla del cuerpo técnico. Si tiene dueño, le pagas el doble.' },
+    6: { n: 'Renovación de patrocinio', tx: 'Avanza al siguiente patrocinio. Si tiene dueño, tira los dados y paga 10 veces el resultado.' },
+    8: { n: 'Alta médica', tx: 'Guárdala: sales de la enfermería gratis cuando quieras.' },
+    10: { n: 'Rotura en el entrenamiento', tx: 'Vas directo a la enfermería. No pasas por el Inicio de temporada ni cobras.' },
+    11: { n: 'Auditoría de salarios', tx: 'Paga 25 por cada progresión (niveles 1-4) y 100 por cada anillo.' },
+    13: { n: 'Nuevo entrenador jefe', tx: 'Avanza hasta el Entrenador jefe. Si pasas por el Inicio de temporada, cobras.' },
+  },
+  fo: {
+    0: { n: 'Primera elección del Draft', tx: 'Avanza hasta el Inicio de temporada y cobra.' },
+    4: { n: 'Alta médica', tx: 'Guárdala: sales de la enfermería gratis cuando quieras.' },
+    5: { n: 'Lesión en el calentamiento', tx: 'Vas directo a la enfermería. No pasas por el Inicio de temporada ni cobras.' },
+    14: { n: 'Renovaciones de contrato', tx: 'Paga 40 por cada progresión (niveles 1-4) y 115 por cada anillo.' },
+  },
+};
+export function cardOf(settings, deck, id) {
+  const base = CARDS[deck][id];
+  if (settings?.board !== 'franquicia') return base;
+  const o = F_CARDS[deck][id];
+  return o ? { ...base, ...o } : base;
+}

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { SQ, CONTRACTS, CONTRACT_ORDER } from '../game/data.js';
+import { CONTRACTS, CONTRACT_ORDER, sqOf, boardOf } from '../game/data.js';
 import { pk, getUte, money, contractErr, contractParties, transferErr, splitPct, OP_TXT, uteOpErr, contractTitle } from '../game/engine.js';
 import { Sheet, Stepper, Dot, PropTag, Seg, M } from './common.jsx';
 
@@ -8,7 +8,7 @@ const nm = (G, i) => G.players[i]?.name;
 
 // ---------- resumen legible de una propuesta ----------
 export function describe(G, kind, d) {
-  const props = (l) => (l || []).map((sq) => SQ[sq].n).join(', ');
+  const props = (l) => (l || []).map((sq) => sqOf(G, sq).n).join(', ');
   const give = (g) => [props(g.props), +g.cash ? money(g.cash) : '', +g.jf ? `${g.jf} recurso${g.jf > 1 ? 's' : ''}` : ''].filter(Boolean).join(' + ') || 'nada';
   switch (kind) {
     case 'trade': return [`${nm(G, d.a)} entrega: ${give(d.ga)}`, `${nm(G, d.b)} entrega: ${give(d.gb)}`];
@@ -17,11 +17,11 @@ export function describe(G, kind, d) {
       `Decisiones: ${d.gov === 'gestor' ? `gestor único (${nm(G, d.gestor)})` : d.gov === 'mayoria' ? 'mayoría' : 'unanimidad'} · Ingresos: ${d.pay === 'caja' ? 'caja común' : 'reparto directo'}`,
       `Duración: ${+d.rounds ? `${d.rounds} rondas` : 'indefinida'} · Cláusula de salida: ${money(+d.exitFee || 0)}`,
     ];
-    case 'loan': return [`${nm(G, d.lender)} presta ${money(d.amount)} a ${nm(G, d.borrower)}`, `Devuelve ${money(d.repay)} en ${d.rounds} rondas (interés ${Math.round(((d.repay - d.amount) / Math.max(1, d.amount)) * 100)} %)`, d.collateral != null ? `Aval: ${SQ[d.collateral].n}` : 'Sin aval'];
-    case 'discount': return [`${nm(G, d.tenant)} paga ${money(d.price)} a ${nm(G, d.owner)}`, `A cambio, ${d.pct} % de descuento en ${d.sqs === 'all' ? 'todas sus franquicias' : props(d.sqs)} durante ${d.rounds} rondas`];
-    case 'cession': return [`${nm(G, d.benef)} paga ${money(d.price)} a ${nm(G, d.owner)}`, `A cambio cobra el ${d.pct} % de los alquileres de ${SQ[d.sq]?.n} ${+d.rounds ? `durante ${d.rounds} rondas` : 'de forma permanente'}`];
-    case 'option': return [`${nm(G, d.holder)} paga ${money(d.premium)} de prima a ${nm(G, d.owner)}`, `Puede comprar ${SQ[d.sq]?.n} por ${money(d.strike)} durante ${d.rounds} rondas`];
-    case 'installment': return [`${nm(G, d.buyer)} se queda ${SQ[d.sq]?.n} de ${nm(G, d.seller)}`, `Entrada ${money(+d.down || 0)} + ${d.n} cuotas de ${money(d.per)} (total ${money((+d.down || 0) + d.per * d.n)})`];
+    case 'loan': return [`${nm(G, d.lender)} presta ${money(d.amount)} a ${nm(G, d.borrower)}`, `Devuelve ${money(d.repay)} en ${d.rounds} rondas (interés ${Math.round(((d.repay - d.amount) / Math.max(1, d.amount)) * 100)} %)`, d.collateral != null ? `Aval: ${sqOf(G, d.collateral).n}` : 'Sin aval'];
+    case 'discount': return [`${nm(G, d.tenant)} paga ${money(d.price)} a ${nm(G, d.owner)}`, `A cambio, ${d.pct} % de descuento en ${d.sqs === 'all' ? `todas sus ${boardOf(G.settings).ownWordPl}` : props(d.sqs)} durante ${d.rounds} rondas`];
+    case 'cession': return [`${nm(G, d.benef)} paga ${money(d.price)} a ${nm(G, d.owner)}`, `A cambio cobra el ${d.pct} % de los alquileres de ${sqOf(G, d.sq)?.n} ${+d.rounds ? `durante ${d.rounds} rondas` : 'de forma permanente'}`];
+    case 'option': return [`${nm(G, d.holder)} paga ${money(d.premium)} de prima a ${nm(G, d.owner)}`, `Puede comprar ${sqOf(G, d.sq)?.n} por ${money(d.strike)} durante ${d.rounds} rondas`];
+    case 'installment': return [`${nm(G, d.buyer)} se queda ${sqOf(G, d.sq)?.n} de ${nm(G, d.seller)}`, `Entrada ${money(+d.down || 0)} + ${d.n} cuotas de ${money(d.per)} (total ${money((+d.down || 0) + d.per * d.n)})`];
     default: return [];
   }
 }
@@ -92,7 +92,7 @@ function UteCard({ ctx, u }) {
         const pend = u.members.filter((m) => !v.yes.includes(m.p) && !v.no.includes(m.p) && ctx.can(m.p));
         return (
           <div key={v.id} className="vote">
-            <p><b>Votación:</b> {OP_TXT[v.op.k]}{v.op.sq != null ? ` ${SQ[v.op.sq].n}` : ''}{v.op.amt ? ` ${money(v.op.amt)}` : ''} (propone {nm(G, v.by)}). A favor: {v.yes.map((i) => nm(G, i)).join(', ') || 'nadie'}{v.no.length ? ` · En contra: ${v.no.map((i) => nm(G, i)).join(', ')}` : ''}</p>
+            <p><b>Votación:</b> {OP_TXT[v.op.k]}{v.op.sq != null ? ` ${sqOf(G, v.op.sq).n}` : ''}{v.op.amt ? ` ${money(v.op.amt)}` : ''} (propone {nm(G, v.by)}). A favor: {v.yes.map((i) => nm(G, i)).join(', ') || 'nadie'}{v.no.length ? ` · En contra: ${v.no.map((i) => nm(G, i)).join(', ')}` : ''}</p>
             <div className="row3">{pend.map((m) => (
               <React.Fragment key={m.p}>
                 <button className="btn hot" onClick={() => dispatch({ t: 'ute_vote', by: m.p, id: v.id, yes: true })}>Sí{ctx.local ? ` (${nm(G, m.p)})` : ''}</button>
@@ -114,7 +114,7 @@ function UteCard({ ctx, u }) {
             {sure ? <button className="btn warn" onClick={() => { setSure(false); dispatch({ t: 'ute_leave', by: ctx.actor, uid: u.id }); }}>Salir pagando {money(u.exitFee)}</button>
               : <button className="btn ghost" onClick={() => setSure(true)}>Salir de la UTE</button>}
           </div>
-          <p className="hint">Para mejorar o hipotecar sus franquicias, tócalas en el tablero.</p>
+          <p className="hint">Para mejorar o hipotecar sus casillas, tócalas en el tablero.</p>
         </div>
       )}
     </article>
@@ -124,8 +124,8 @@ function UteCard({ ctx, u }) {
 function ContractCard({ ctx, c }) {
   const { G, dispatch } = ctx;
   const lines = {
-    loan: `Devolver ${money(c.repay)} al empezar la ronda ${c.due}${c.collateral != null ? ` · aval ${SQ[c.collateral].n}` : ''}`,
-    discount: `${c.pct} % de descuento en ${c.sqs === 'all' ? 'todas sus franquicias' : c.sqs.map((s) => SQ[s].n).join(', ')} hasta la ronda ${c.end}`,
+    loan: `Devolver ${money(c.repay)} al empezar la ronda ${c.due}${c.collateral != null ? ` · aval ${sqOf(G, c.collateral).n}` : ''}`,
+    discount: `${c.pct} % de descuento en ${c.sqs === 'all' ? `todas sus ${boardOf(G.settings).ownWordPl}` : c.sqs.map((s) => sqOf(G, s).n).join(', ')} hasta la ronda ${c.end}`,
     cession: `${c.pct} % de los alquileres${c.end ? ` hasta la ronda ${c.end}` : ', permanente'}`,
     option: `Compra a ${money(c.strike)} hasta la ronda ${c.end}`,
     installment: `Quedan ${c.left} cuotas de ${money(c.per)} a ${nm(G, c.seller)}`,
@@ -238,7 +238,7 @@ function Who({ G, label, value, set, options }) {
 
 function PropPicker({ G, owner, value, set, multi = true, label, allowLocked }) {
   const list = own(G, owner);
-  if (!list.length) return <div className="field"><span className="flabel">{label}</span><p className="hint">{G.players[owner].name} no tiene franquicias.</p></div>;
+  if (!list.length) return <div className="field"><span className="flabel">{label}</span><p className="hint">{G.players[owner].name} no tiene {boardOf(G.settings).ownWordPl}.</p></div>;
   const sel = multi ? value || [] : value;
   const toggle = (sq) => { if (!multi) set(sq === sel ? null : sq); else set(sel.includes(sq) ? sel.filter((x) => x !== sq) : [...sel, sq]); };
   return (
@@ -257,9 +257,9 @@ function TradeForm({ G, d, set, others }) {
   const side = (who, key) => (
     <div className="side">
       <h4>{G.players[who].name} entrega</h4>
-      <PropPicker G={G} owner={who} value={d[key].props} set={(v) => set({ [key]: { ...d[key], props: v } })} label="Franquicias" />
+      <PropPicker G={G} owner={who} value={d[key].props} set={(v) => set({ [key]: { ...d[key], props: v } })} label="Casillas" />
       <Num label="Dinero" value={d[key].cash} set={(v) => set({ [key]: { ...d[key], cash: v } })} step={10} max={G.players[who].cash} />
-      {G.players[who].jailFree.length > 0 && <Num label="Cartas «Recurso aprobado»" value={d[key].jf} set={(v) => set({ [key]: { ...d[key], jf: v } })} step={1} max={G.players[who].jailFree.length} />}
+      {G.players[who].jailFree.length > 0 && <Num label={G.settings.board === 'franquicia' ? 'Cartas «Alta médica»' : 'Cartas «Recurso aprobado»'} value={d[key].jf} set={(v) => set({ [key]: { ...d[key], jf: v } })} step={1} max={G.players[who].jailFree.length} />}
     </div>
   );
   return (
@@ -279,7 +279,7 @@ function UteForm({ G, d, set, me, others }) {
     set({ members, pct, props: { ...d.props, [i]: d.props[i] || [] }, cash: { ...d.cash, [i]: d.cash[i] || 0 } });
   };
   const byValue = () => {
-    const vals = d.members.map((m) => ({ p: m, pct: (d.props[m] || []).reduce((a, sq) => a + SQ[sq].price, 0) + (+d.cash[m] || 0) }));
+    const vals = d.members.map((m) => ({ p: m, pct: (d.props[m] || []).reduce((a, sq) => a + sqOf(G, sq).price, 0) + (+d.cash[m] || 0) }));
     if (vals.some((v) => v.pct <= 0)) { const pct = {}; d.members.forEach((m) => { pct[m] = Math.round(100 / d.members.length); }); return set({ pct }); }
     const sh = splitPct(100, vals); const pct = {}; sh.forEach(({ p, v }) => { pct[p] = Math.max(1, v); });
     const diff = 100 - Object.values(pct).reduce((a, b) => a + b, 0); pct[d.members[0]] += diff;
@@ -295,7 +295,7 @@ function UteForm({ G, d, set, me, others }) {
       {d.members.map((m) => (
         <div key={m} className="side">
           <h4><Dot col={G.players[m].col} /> {G.players[m].name}</h4>
-          <PropPicker G={G} owner={m} value={d.props[m]} set={(v) => set({ props: { ...d.props, [m]: v } })} label="Franquicias que aporta" />
+          <PropPicker G={G} owner={m} value={d.props[m]} set={(v) => set({ props: { ...d.props, [m]: v } })} label="Casillas que aporta" />
           <div className="row2">
             <Num label="Dinero a la caja" value={d.cash[m]} set={(v) => set({ cash: { ...d.cash, [m]: v } })} step={10} max={G.players[m].cash} />
             <Num label="Participación" value={d.pct[m]} set={(v) => set({ pct: { ...d.pct, [m]: v } })} step={5} min={1} max={99} suffix="%" />
@@ -341,9 +341,9 @@ function DiscountForm({ G, d, set, me, others }) {
   return (
     <>
       <div className="field"><span className="flabel">Tú</span><Seg value={iOwner ? 'o' : 't'} set={(v) => set(v === 'o' ? { owner: me, tenant: other, sqs: 'all' } : { owner: other, tenant: me, sqs: 'all' })} opts={[['t', 'Compras el pase'], ['o', 'Vendes el pase']]} /></div>
-      <Who G={G} label={iOwner ? 'A quién se lo vendes' : 'Dueño de las franquicias'} value={other} set={(o) => set(iOwner ? { tenant: o } : { owner: o, sqs: 'all' })} options={others} />
-      <div className="field"><span className="flabel">Qué cubre</span><Seg value={d.sqs === 'all' ? 'all' : 'some'} set={(v) => set({ sqs: v === 'all' ? 'all' : [] })} opts={[['all', 'Todas sus franquicias'], ['some', 'Solo algunas']]} /></div>
-      {d.sqs !== 'all' && <PropPicker G={G} owner={d.owner} value={d.sqs} set={(sqs) => set({ sqs })} label="Franquicias cubiertas" allowLocked />}
+      <Who G={G} label={iOwner ? 'A quién se lo vendes' : 'Dueño'} value={other} set={(o) => set(iOwner ? { tenant: o } : { owner: o, sqs: 'all' })} options={others} />
+      <div className="field"><span className="flabel">Qué cubre</span><Seg value={d.sqs === 'all' ? 'all' : 'some'} set={(v) => set({ sqs: v === 'all' ? 'all' : [] })} opts={[['all', 'Todas sus casillas'], ['some', 'Solo algunas']]} /></div>
+      {d.sqs !== 'all' && <PropPicker G={G} owner={d.owner} value={d.sqs} set={(sqs) => set({ sqs })} label="Casillas cubiertas" allowLocked />}
       <div className="row2">
         <Num label="Descuento" value={d.pct} set={(pct) => set({ pct })} step={10} min={10} max={100} suffix="%" />
         <Num label="Rondas" value={d.rounds} set={(rounds) => set({ rounds })} step={1} min={1} max={30} />
@@ -358,8 +358,8 @@ function CessionForm({ G, d, set, me, others }) {
   return (
     <>
       <div className="field"><span className="flabel">Tú</span><Seg value={iOwner ? 'o' : 'b'} set={(v) => set(v === 'o' ? { owner: me, benef: other, sq: null } : { owner: other, benef: me, sq: null })} opts={[['o', 'Vendes ingresos'], ['b', 'Compras ingresos']]} /></div>
-      <Who G={G} label={iOwner ? 'A quién' : 'Dueño de la franquicia'} value={other} set={(o) => set(iOwner ? { benef: o } : { owner: o, sq: null })} options={others} />
-      <PropPicker G={G} owner={d.owner} multi={false} value={d.sq} set={(sq) => set({ sq })} label="Franquicia" allowLocked />
+      <Who G={G} label={iOwner ? 'A quién' : 'Dueño'} value={other} set={(o) => set(iOwner ? { benef: o } : { owner: o, sq: null })} options={others} />
+      <PropPicker G={G} owner={d.owner} multi={false} value={d.sq} set={(sq) => set({ sq })} label="Casilla" allowLocked />
       <div className="row2">
         <Num label="% de cada alquiler" value={d.pct} set={(pct) => set({ pct })} step={5} min={5} max={90} suffix="%" />
         <Num label="Rondas" hint={+d.rounds ? '' : '0 = permanente'} value={d.rounds} set={(rounds) => set({ rounds })} step={1} max={60} />
@@ -374,8 +374,8 @@ function OptionForm({ G, d, set, me, others }) {
   return (
     <>
       <div className="field"><span className="flabel">Tú</span><Seg value={iHolder ? 'h' : 'o'} set={(v) => set(v === 'h' ? { holder: me, owner: other, sq: null } : { holder: other, owner: me, sq: null })} opts={[['h', 'Compras la opción'], ['o', 'Vendes la opción']]} /></div>
-      <Who G={G} label={iHolder ? 'Dueño de la franquicia' : 'A quién'} value={other} set={(o) => set(iHolder ? { owner: o, sq: null } : { holder: o })} options={others} />
-      <PropPicker G={G} owner={d.owner} multi={false} value={d.sq} set={(sq) => set({ sq, strike: sq != null ? Math.round(SQ[sq].price * 1.4 / 10) * 10 : d.strike })} label="Franquicia" allowLocked />
+      <Who G={G} label={iHolder ? 'Dueño' : 'A quién'} value={other} set={(o) => set(iHolder ? { owner: o, sq: null } : { holder: o })} options={others} />
+      <PropPicker G={G} owner={d.owner} multi={false} value={d.sq} set={(sq) => set({ sq, strike: sq != null ? Math.round(sqOf(G, sq).price * 1.4 / 10) * 10 : d.strike })} label="Casilla" allowLocked />
       <div className="row2">
         <Num label="Prima (ahora)" value={d.premium} set={(premium) => set({ premium })} step={10} />
         <Num label="Precio de compra" value={d.strike} set={(strike) => set({ strike })} step={10} min={1} />
@@ -391,7 +391,7 @@ function InstallForm({ G, d, set, me, others }) {
     <>
       <div className="field"><span className="flabel">Tú</span><Seg value={iBuyer ? 'b' : 's'} set={(v) => set(v === 'b' ? { buyer: me, seller: other, sq: null } : { buyer: other, seller: me, sq: null })} opts={[['b', 'Compras'], ['s', 'Vendes']]} /></div>
       <Who G={G} label={iBuyer ? 'Vendedor' : 'Comprador'} value={other} set={(o) => set(iBuyer ? { seller: o, sq: null } : { buyer: o })} options={others} />
-      <PropPicker G={G} owner={d.seller} multi={false} value={d.sq} set={(sq) => set({ sq })} label="Franquicia" />
+      <PropPicker G={G} owner={d.seller} multi={false} value={d.sq} set={(sq) => set({ sq })} label="Casilla" />
       <Num label="Entrada" value={d.down} set={(down) => set({ down })} step={10} />
       <div className="row2">
         <Num label="Cuota por ronda" value={d.per} set={(per) => set({ per })} step={10} min={1} />

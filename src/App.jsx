@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { reduce, why, makeLobby, newLocalGame, cleanSettings, normalize, DEFAULT_SETTINGS } from './game/engine.js';
 import { nextAutoAction, isAuto } from './game/bot.js';
-import { MODES, BUILD_SETS } from './game/data.js';
+import { MODES, BUILD_SETS, BOARDS, teamName, buildSet } from './game/data.js';
 import { createRoom, getRoom, updateRoom, subscribeRoom } from './lib/supabase.js';
 import Game, { EndScreen } from './ui/Game.jsx';
 import Rules from './ui/Rules.jsx';
-import { SettingsForm, LocalPlayers } from './ui/Setup.jsx';
+import { SettingsForm, LocalPlayers, TeamSelect } from './ui/Setup.jsx';
 import { Dot } from './ui/common.jsx';
 
 const ls = {
@@ -140,7 +140,7 @@ export default function App() {
   // ----- partida local -----
   if (screen === 'local' && localG) {
     if (localG.status === 'ended') {
-      return <>{toastEl}<EndScreen G={localG} onRematch={() => setLocalG(newLocalGame(localG.settings, localG.players.map((p) => ({ name: p.name, bot: p.bot }))))} onHome={() => { setLocalG(null); ls.del('fq-local'); goHome(); }} /></>;
+      return <>{toastEl}<EndScreen G={localG} onRematch={() => setLocalG(newLocalGame(localG.settings, localG.players.map((p) => ({ name: p.name, bot: p.bot, team: p.team }))))} onHome={() => { setLocalG(null); ls.del('fq-local'); goHome(); }} /></>;
     }
     const ctx = { G: localG, dispatch: localDispatch, can: (i) => !!localG.players[i] && !localG.players[i].bot && !localG.players[i].bankrupt, local: true, actor, setActor, isHost: true, hostIdx: localG.players.findIndex((p) => !p.bot) };
     return <>{toastEl}<Game ctx={ctx} onExit={() => setScreen('home')} /></>;
@@ -157,7 +157,7 @@ export default function App() {
       if (me === null || G.status === 'ended' || (G.status === 'playing' && meAway)) { goHome(); return; }
       Promise.race([onlineDispatch(G.status === 'lobby' ? { t: 'leave', id: myId } : { t: 'leave', by: me }, true), new Promise((r) => setTimeout(r, 2500))]).finally(goHome);
     };
-    if (G.status === 'lobby') return <>{toastEl}<Lobby G={G} code={code} isHost={G.host === myId} dispatch={onlineDispatch} onExit={leaveRoom} /></>;
+    if (G.status === 'lobby') return <>{toastEl}<Lobby G={G} code={code} isHost={G.host === myId} dispatch={onlineDispatch} onExit={leaveRoom} myId={myId} /></>;
     if (G.status === 'ended') return <>{toastEl}<EndScreen G={G} onRematch={G.host === myId ? () => onlineDispatch({ t: 'rematch', by: me }) : null} onHome={goHome} /></>;
     const ctx = {
       G, dispatch: onlineDispatch, local: false,
@@ -182,7 +182,7 @@ export default function App() {
       <Shell>
         <button className="mini back" onClick={() => setScreen('home')}>← Inicio</button>
         <h2 className="h2">{online ? 'Nueva partida online' : 'Partida en este móvil'}</h2>
-        {!online && <LocalPlayers list={localPlayers} set={setLocalPlayers} />}
+        {!online && <LocalPlayers list={localPlayers} set={setLocalPlayers} board={settings.board} />}
         <SettingsForm s={settings} set={setSettings} />
         {msg && <p className="note">{msg}</p>}
         {online && <p className="hint">Los bots se añaden en la sala, antes de empezar.</p>}
@@ -190,7 +190,7 @@ export default function App() {
           onClick={() => {
             if (online) create();
             else {
-              const list = localPlayers.map((p, i) => ({ name: (p.name || '').trim() || `Jugador ${i + 1}`, bot: !!p.bot }));
+              const list = localPlayers.map((p, i) => ({ name: (p.name || '').trim() || `Jugador ${i + 1}`, bot: !!p.bot, team: settings.board === 'franquicia' ? p.team || null : null }));
               setLocalG(newLocalGame(cleanSettings(settings), list)); setActor(null); setScreen('local');
             }
           }}>{online ? (busy ? 'Creando…' : 'Crear sala') : 'Empezar partida'}</button>
@@ -250,7 +250,8 @@ function EnterName({ code, onDone }) {
   );
 }
 
-function Lobby({ G, code, isHost, dispatch, onExit }) {
+function Lobby({ G, code, isHost, dispatch, onExit, myId }) {
+  const me = G.players.find((p) => p.id === myId);
   const [copied, setCopied] = useState(false);
   const [edit, setEdit] = useState(false);
   const [draft, setDraft] = useState(G.settings);
@@ -266,15 +267,21 @@ function Lobby({ G, code, isHost, dispatch, onExit }) {
         <h3 className="h3">Jugadores ({G.players.length}/6)</h3>
         <ul className="plist">
           {G.players.map((p) => (
-            <li key={p.id}><Dot col={p.col} /><b>{p.name}</b><span>{p.bot ? 'bot' : p.id === G.host ? 'anfitrión' : ''}</span>
+            <li key={p.id}><Dot col={p.col} /><b>{p.name}{s.board === 'franquicia' ? ` · ${p.team ? teamName(p.team) : (p.bot ? 'al azar' : 'sin elegir')}` : ''}</b><span>{p.bot ? 'bot' : p.id === G.host ? 'anfitrión' : ''}</span>
               {isHost && p.id !== G.host && <button className="mini" onClick={() => dispatch({ t: 'kick', id: p.id })}>Quitar</button>}</li>
           ))}
         </ul>
         {isHost && G.players.length < 6 && <button className="btn ghost" onClick={() => dispatch({ t: 'add_bot' })}>+ Añadir bot</button>}
+        {s.board === 'franquicia' && me && (
+          <div className="field"><span className="flabel">Tu franquicia</span>
+            <TeamSelect value={me.team} set={(team) => dispatch({ t: 'pick_team', id: me.id, team })} taken={G.players.map((x) => x.team).filter(Boolean)} />
+            <small className="hint">Si no eliges, te toca una al azar al empezar.</small>
+          </div>
+        )}
       </section>
       <section className="block">
         <h3 className="h3">Ajustes</h3>
-        <p className="hint">{MODES[s.mode].n}{s.maxRounds ? `, ${s.maxRounds} rondas` : ', sin límite'} · {s.contracts ? 'con contratos' : 'sin contratos'} · se construyen {BUILD_SETS[s.build].n.toLowerCase()} · reglas {s.ruleset === 'personal' ? 'a medida' : s.ruleset} · {s.startCash} iniciales</p>
+        <p className="hint">{BOARDS[s.board || 'liga'].n} · {MODES[s.mode].n}{s.maxRounds ? `, ${s.maxRounds} rondas` : ', sin límite'} · {s.contracts ? 'con contratos' : 'sin contratos'} · se construye: {buildSet(s).n.toLowerCase()} · reglas {s.ruleset === 'personal' ? 'a medida' : s.ruleset} · {s.startCash} iniciales</p>
         {isHost && !edit && <button className="btn ghost" onClick={() => { setDraft(G.settings); setEdit(true); }}>Cambiar ajustes</button>}
         {edit && <><SettingsForm s={draft} set={setDraft} /><button className="btn" onClick={() => { dispatch({ t: 'settings', settings: draft }); setEdit(false); }}>Guardar ajustes</button></>}
       </section>

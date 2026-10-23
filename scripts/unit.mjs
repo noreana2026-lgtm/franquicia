@@ -153,7 +153,7 @@ T('construcción pareja y grupo', () => {
 
 T('límite de rondas y ampliación', () => {
   let G = base({ mode: 'rapida', maxRounds: 1 });
-  assert.equal(Object.keys(G.props).length, 6);
+  assert.equal(Object.keys(G.props).length, 9);
   G.phase = 'end'; G.turn = 2; G = R(G, { t: 'end_turn', by: 2 });
   assert.equal(G.limit, true); assert.ok(why(G, { t: 'roll', by: G.turn }));
   G = R(G, { t: 'extend', by: 0, n: 5 }); assert.equal(G.maxRounds, 6); assert.equal(G.limit, false);

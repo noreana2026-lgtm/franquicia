@@ -1,5 +1,5 @@
 // Motor de Franquicia: reductor puro (estado + acción → estado nuevo). Lo usan igual la partida local, la online y los bots.
-import { SQ, GROUPS, groupSqs, OWNABLE, TEAMS, CARDS, RULESETS, PCOLS, BOT_NAMES } from './data.js';
+import { SQ, GROUPS, groupSqs, OWNABLE, TEAMS, RULESETS, PCOLS, BOT_NAMES, sqOf, cardOf, boardOf, SCORE, NBA_TEAMS } from './data.js';
 
 let RNG = Math.random;
 export const setRng = (f) => { RNG = f; };
@@ -8,6 +8,7 @@ const shuffle = (a) => { const b = a.slice(); for (let i = b.length - 1; i > 0; 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const int = (v, d = 0) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? n : d; };
 
+export const V = (G) => boardOf(G.settings);
 export const pk = (i) => 'p' + i;
 export const isP = (o) => typeof o === 'string' && o[0] === 'p';
 export const isU = (o) => typeof o === 'string' && o[0] === 'u';
@@ -15,12 +16,13 @@ export const oNum = (o) => +String(o).slice(1);
 export const money = (v) => `$${Math.round(v).toLocaleString('es-ES')}M`;
 
 export const DEFAULT_SETTINGS = {
-  mode: 'estandar', contracts: true, build: 'infra', ruleset: 'caseras', rules: { ...RULESETS.caseras },
-  maxRounds: 0, startCash: 1500, salary: 200, deal: 2,
+  board: 'liga', mode: 'estandar', contracts: true, build: 'infra', ruleset: 'caseras', rules: { ...RULESETS.caseras },
+  maxRounds: 0, startCash: 1500, salary: 200, deal: 3,
 };
 
 export function cleanSettings(s = {}) {
   const o = { ...DEFAULT_SETTINGS, ...(s || {}) };
+  o.board = o.board === 'franquicia' ? 'franquicia' : 'liga';
   o.mode = o.mode === 'rapida' ? 'rapida' : 'estandar';
   o.contracts = o.contracts !== false;
   o.build = o.build === 'plantilla' ? 'plantilla' : 'infra';
@@ -32,7 +34,7 @@ export function cleanSettings(s = {}) {
   if (o.mode === 'rapida' && !o.maxRounds) o.maxRounds = 20;
   o.startCash = Math.max(500, Math.min(5000, int(o.startCash, 1500)));
   o.salary = Math.max(50, Math.min(500, int(o.salary, 200)));
-  o.deal = Math.max(0, Math.min(3, int(o.deal, 2)));
+  o.deal = Math.max(0, Math.min(4, int(o.deal, 3)));
   return o;
 }
 
@@ -55,7 +57,7 @@ export function stock(G) {
 }
 
 export function rentOf(G, sq, diceSum = 7) {
-  const s = SQ[sq]; const p = G.props[sq];
+  const s = sqOf(G, sq); const p = G.props[sq];
   if (!p || p.mort) return 0;
   if (s.t === 'team') return p.lvl > 0 ? s.rent[p.lvl] : (hasGroup(G, p.o, s.g) ? s.rent[0] * 2 : s.rent[0]);
   const same = SQ.filter((x) => x.t === s.t && G.props[x.i]?.o === p.o).length;
@@ -66,7 +68,7 @@ export function rentOf(G, sq, diceSum = 7) {
 
 export function propValue(G, sq) {
   const p = G.props[sq]; if (!p) return 0;
-  const s = SQ[sq];
+  const s = sqOf(G, sq);
   return (p.mort ? s.price / 2 : s.price) + (p.lvl ? p.lvl * houseCost(sq) : 0);
 }
 
@@ -89,8 +91,19 @@ export function netWorth(G, i) {
   return Math.round(v);
 }
 
+// Valoración final: en el tablero liga es el patrimonio; en el tablero franquicia suma palmarés (grupos completos y anillos).
+export function bonusOf(G, i) {
+  if (G.settings?.board !== 'franquicia') return { groups: 0, rings: 0, v: 0 };
+  let groups = 0; let rings = 0;
+  const gs = [...new Set(TEAMS.map((sq) => SQ[sq].g))];
+  gs.forEach((g) => { if (groupSqs(g).every((j) => G.props[j]?.o === pk(i))) groups++; });
+  Object.values(G.props).forEach((p) => { if (p.o === pk(i) && p.lvl === 5) rings++; });
+  return { groups, rings, v: groups * SCORE.group + rings * SCORE.ring };
+}
+export const scoreOf = (G, i) => netWorth(G, i) + bonusOf(G, i).v;
+
 export function rank(G) {
-  const rows = G.players.map((p, i) => ({ i, p, w: netWorth(G, i) }));
+  const rows = G.players.map((p, i) => ({ i, p, w: scoreOf(G, i) }));
   const outPos = (i) => (G.outOrder || []).indexOf(i);
   rows.sort((a, b) => (a.p.bankrupt - b.p.bankrupt) || (a.p.bankrupt ? outPos(b.i) - outPos(a.i) : b.w - a.w));
   return rows;
@@ -103,8 +116,8 @@ export function lockOf(G, sq) {
 // ¿Puede la entidad `o` entregar la franquicia `sq` (traspaso, aporte a UTE, aval…)?
 export function transferErr(G, o, sq, ignoreLock = null) {
   const p = G.props[sq];
-  if (!p || p.o !== o) return `${SQ[sq]?.n || 'Esa franquicia'} no es de ${entName(G, o)}`;
-  const s = SQ[sq];
+  if (!p || p.o !== o) return `${sqOf(G, sq)?.n || 'Esa franquicia'} no es de ${entName(G, o)}`;
+  const s = sqOf(G, sq);
   if (s.t === 'team' && groupSqs(s.g).some((j) => G.props[j]?.lvl > 0)) return `${s.n}: su grupo tiene mejoras; véndelas antes`;
   const l = lockOf(G, sq);
   if (l && l !== ignoreLock) return `${s.n} está bloqueada por un contrato`;
@@ -166,15 +179,15 @@ function gain(G, o, amt) { if (isP(o)) G.players[oNum(o)].cash += amt; else if (
 function log(G, t) { G.log.push({ r: G.round || 0, t }); if (G.log.length > 90) G.log.splice(0, G.log.length - 90); }
 
 // ---------- creación ----------
-function mkPlayer(p, i) { return { id: p.id, name: p.name, bot: !!p.bot, col: PCOLS[i % PCOLS.length], away: false }; }
+function mkPlayer(p, i) { return { id: p.id, name: p.name, bot: !!p.bot, col: PCOLS[i % PCOLS.length], away: false, team: p.team || null }; }
 
 export function makeLobby(settings, host) {
   return { v: 1, seq: 0, status: 'lobby', host: host.id, settings: cleanSettings(settings), players: [mkPlayer(host, 0)], log: [] };
 }
 
 export function newLocalGame(settings, list) {
-  const G = makeLobby(settings, { id: 'l0', name: list[0].name, bot: list[0].bot });
-  list.slice(1).forEach((p, i) => G.players.push(mkPlayer({ id: 'l' + (i + 1), name: p.name, bot: p.bot }, i + 1)));
+  const G = makeLobby(settings, { id: 'l0', name: list[0].name, bot: list[0].bot, team: list[0].team });
+  list.slice(1).forEach((p, i) => G.players.push(mkPlayer({ id: 'l' + (i + 1), name: p.name, bot: p.bot, team: p.team }, i + 1)));
   G.local = true;
   startGame(G);
   return G;
@@ -182,7 +195,15 @@ export function newLocalGame(settings, list) {
 
 function startGame(G) {
   const S = G.settings = cleanSettings(G.settings);
-  const order = shuffle(G.players.map((p) => ({ id: p.id, name: p.name, bot: p.bot })));
+  const order = shuffle(G.players.map((p) => ({ id: p.id, name: p.name, bot: p.bot, team: p.team || null })));
+  if (S.board === 'franquicia') {
+    const used = new Set(order.map((p) => p.team).filter(Boolean));
+    const seen = new Set();
+    order.forEach((p) => {
+      if (!p.team || seen.has(p.team)) { p.team = shuffle(NBA_TEAMS.map((t) => t[0]).filter((c) => !used.has(c)))[0]; used.add(p.team); }
+      seen.add(p.team);
+    });
+  }
   G.players = order.map((p, i) => ({ ...mkPlayer(p, i), cash: S.startCash, pos: 0, inJail: false, jailTries: 0, jailFree: [], bankrupt: false }));
   Object.assign(G, {
     status: 'playing', props: {}, utes: [], contracts: [], proposals: [], votes: [], debts: [], pot: 0,
@@ -193,7 +214,7 @@ function startGame(G) {
   if (S.mode === 'rapida' && S.deal) {
     const pool = shuffle(TEAMS);
     G.players.forEach((_, i) => { for (let k = 0; k < S.deal; k++) { const sq = pool.pop(); G.props[sq] = { o: pk(i), lvl: 0, mort: false }; } });
-    log(G, `Reparto inicial: ${S.deal} franquicias al azar para cada jugador.`);
+    log(G, `Reparto inicial: ${S.deal} ${V(G).ownWordPl} al azar para cada uno.`);
   }
   log(G, `Empieza la partida. Abre ${G.players[0].name}.`);
   return true;
@@ -204,7 +225,7 @@ function passGo(G, i, exact) {
   const P = G.players[i]; const S = G.settings;
   const v = S.salary * (exact && S.rules.doubleGo ? 2 : 1);
   P.cash += v;
-  log(G, `${P.name} pasa por la Noche del Draft: cobra ${money(v)}${exact && S.rules.doubleGo ? ' (doble por caer justo)' : ''}.`);
+  log(G, `${P.name} pasa por ${sqOf(G, 0).n}: cobra ${money(v)}${exact && S.rules.doubleGo ? ' (doble por caer justo)' : ''}.`);
 }
 function advance(G, i, steps) {
   const P = G.players[i]; const np = P.pos + steps;
@@ -220,11 +241,11 @@ function toJail(G, i) {
   const P = G.players[i];
   P.pos = 10; P.inJail = true; P.jailTries = 0;
   if (G.turn === i) { G.again = false; G.doubles = 0; }
-  log(G, `${P.name} queda sancionado.`);
+  log(G, `${P.name} va a la ${V(G).jail}.`);
 }
 
 function land(G, i, mod) {
-  const P = G.players[i]; const s = SQ[P.pos];
+  const P = G.players[i]; const s = sqOf(G, P.pos);
   switch (s.t) {
     case 'team': case 'tv': case 'util': {
       if (!G.props[s.i]) { G.phase = 'buy'; G.pending = { sq: s.i }; return; }
@@ -246,7 +267,7 @@ function land(G, i, mod) {
 }
 
 function payRent(G, i, sq, mod) {
-  const P = G.players[i]; const pr = G.props[sq]; const s = SQ[sq];
+  const P = G.players[i]; const pr = G.props[sq]; const s = sqOf(G, sq);
   const o = pr.o;
   if (o === pk(i)) return;
   if (pr.mort) { log(G, `${s.n} está hipotecada: ${P.name} no paga.`); return; }
@@ -256,7 +277,7 @@ function payRent(G, i, sq, mod) {
   let parts;
   if (isP(o)) {
     const ow = oNum(o);
-    if (G.players[ow].inJail && !G.settings.rules.jailRent) { log(G, `${G.players[ow].name} está sancionado y no cobra ${s.n}.`); return; }
+    if (G.players[ow].inJail && !G.settings.rules.jailRent) { log(G, `${G.players[ow].name} está ${V(G).jailed} y no cobra ${s.n}.`); return; }
     const disc = G.contracts.filter((c) => c.k === 'discount' && c.owner === ow && c.tenant === i && (c.sqs === 'all' || c.sqs.includes(sq)));
     const pct = disc.reduce((a, c) => Math.max(a, c.pct), 0);
     if (pct) base = Math.round((base * (100 - pct)) / 100);
@@ -280,7 +301,7 @@ function payRent(G, i, sq, mod) {
 
 function drawCard(G, i, deck) {
   const P = G.players[i];
-  const id = G.decks[deck].shift(); const c = CARDS[deck][id];
+  const id = G.decks[deck].shift(); const c = cardOf(G.settings, deck, id);
   if (c.fx.k !== 'jailfree') G.decks[deck].push(id);
   G.card = { deck, id, p: i, seq: (G.card?.seq || 0) + 1 };
   log(G, `${P.name} roba ${deck === 'td' ? 'Trade Deadline' : 'Front Office'}: «${c.n}».`);
@@ -305,7 +326,7 @@ function drawCard(G, i, deck) {
       return;
     }
     case 'nearest': {
-      let to = P.pos; do { to = (to + 1) % 40; } while (SQ[to].t !== fx.t);
+      let to = P.pos; do { to = (to + 1) % 40; } while (sqOf(G, to).t !== fx.t);
       moveTo(G, i, to, fx.t === 'tv' ? 'tv2' : 'util10');
       return;
     }
@@ -336,7 +357,7 @@ function newRound(G) {
       if (c.collateral != null && G.props[c.collateral]?.o === pk(c.borrower)) {
         liquidateGroup(G, c.collateral);
         G.props[c.collateral].o = pk(c.lender);
-        log(G, `${B.name} no puede devolver el préstamo: el aval (${SQ[c.collateral].n}) pasa a ${L.name}.`);
+        log(G, `${B.name} no puede devolver el préstamo: el aval (${sqOf(G, c.collateral).n}) pasa a ${L.name}.`);
         return;
       }
       log(G, `Vence el préstamo de ${L.name} a ${B.name} y no hay liquidez: queda como deuda.`);
@@ -348,13 +369,13 @@ function newRound(G) {
       if (B.bankrupt || Se.bankrupt || G.props[c.sq]?.o !== pk(c.buyer)) return;
       if (B.cash >= c.per) {
         B.cash -= c.per; Se.cash += c.per; c.left--;
-        log(G, `${B.name} paga la cuota de ${SQ[c.sq].n} a ${Se.name} (${money(c.per)}; ${c.left ? `quedan ${c.left}` : 'última'}).`);
+        log(G, `${B.name} paga la cuota de ${sqOf(G, c.sq).n} a ${Se.name} (${money(c.per)}; ${c.left ? `quedan ${c.left}` : 'última'}).`);
         if (c.left > 0) keep.push(c);
         return;
       }
       liquidateGroup(G, c.sq);
       G.props[c.sq].o = pk(c.seller);
-      log(G, `${B.name} no paga la cuota: ${SQ[c.sq].n} vuelve a ${Se.name}.`);
+      log(G, `${B.name} no paga la cuota: ${sqOf(G, c.sq).n} vuelve a ${Se.name}.`);
       return;
     }
     if (c.end && G.round > c.end) { log(G, `Caduca un contrato: ${contractTitle(G, c)}.`); return; }
@@ -370,15 +391,15 @@ export function contractTitle(G, c) {
   switch (c.k) {
     case 'loan': return `Préstamo de ${n(c.lender)} a ${n(c.borrower)}`;
     case 'discount': return `Pase VIP de ${n(c.owner)} a ${n(c.tenant)}`;
-    case 'cession': return `Cesión de ${SQ[c.sq].n} a ${n(c.benef)}`;
-    case 'option': return `Opción de ${n(c.holder)} sobre ${SQ[c.sq].n}`;
-    case 'installment': return `Plazos de ${SQ[c.sq].n} (${n(c.buyer)})`;
+    case 'cession': return `Cesión de ${sqOf(G, c.sq).n} a ${n(c.benef)}`;
+    case 'option': return `Opción de ${n(c.holder)} sobre ${sqOf(G, c.sq).n}`;
+    case 'installment': return `Plazos de ${sqOf(G, c.sq).n} (${n(c.buyer)})`;
     default: return 'Contrato';
   }
 }
 
 function liquidateGroup(G, sq) {
-  const s = SQ[sq]; if (s.t !== 'team') return;
+  const s = sqOf(G, sq); if (s.t !== 'team') return;
   groupSqs(s.g).forEach((j) => { const p = G.props[j]; if (p && p.lvl > 0) { gain(G, p.o, Math.round((p.lvl * houseCost(j)) / 2)); p.lvl = 0; } });
 }
 
@@ -410,7 +431,7 @@ function dissolve(G, u) {
   if (u.caja > 0 && u.members.length) splitPct(u.caja, u.members).forEach(({ p, v }) => { G.players[p].cash += v; });
   u.caja = 0; u.active = false;
   G.votes = G.votes.filter((v) => v.uid !== u.id);
-  log(G, `UTE ${u.name} disuelta: cada franquicia vuelve a quien la aportó y la caja se reparte.`);
+  log(G, `UTE ${u.name} disuelta: cada casilla vuelve a quien la aportó y la caja se reparte.`);
 }
 
 export function uteOpErr(G, u, op) {
@@ -429,10 +450,10 @@ export function uteOpErr(G, u, op) {
 function uteOpRun(G, u, op) {
   const key = 'u' + u.id;
   switch (op.k) {
-    case 'build': uteSpend(G, u, houseCost(op.sq)); G.props[op.sq].lvl++; log(G, `UTE ${u.name} mejora ${SQ[op.sq].n} (nivel ${G.props[op.sq].lvl}).`); break;
-    case 'sell': G.props[op.sq].lvl--; uteIncome(G, u, Math.round(houseCost(op.sq) / 2)); log(G, `UTE ${u.name} vende una mejora de ${SQ[op.sq].n}.`); break;
-    case 'mortgage': G.props[op.sq].mort = true; uteIncome(G, u, mortValue(op.sq)); log(G, `UTE ${u.name} hipoteca ${SQ[op.sq].n}.`); break;
-    case 'unmortgage': uteSpend(G, u, unmortCost(op.sq)); G.props[op.sq].mort = false; log(G, `UTE ${u.name} levanta la hipoteca de ${SQ[op.sq].n}.`); break;
+    case 'build': uteSpend(G, u, houseCost(op.sq)); G.props[op.sq].lvl++; log(G, `UTE ${u.name} mejora ${sqOf(G, op.sq).n} (nivel ${G.props[op.sq].lvl}).`); break;
+    case 'sell': G.props[op.sq].lvl--; uteIncome(G, u, Math.round(houseCost(op.sq) / 2)); log(G, `UTE ${u.name} vende una mejora de ${sqOf(G, op.sq).n}.`); break;
+    case 'mortgage': G.props[op.sq].mort = true; uteIncome(G, u, mortValue(op.sq)); log(G, `UTE ${u.name} hipoteca ${sqOf(G, op.sq).n}.`); break;
+    case 'unmortgage': uteSpend(G, u, unmortCost(op.sq)); G.props[op.sq].mort = false; log(G, `UTE ${u.name} levanta la hipoteca de ${sqOf(G, op.sq).n}.`); break;
     case 'dividend': { const a = int(op.amt); u.caja -= a; splitPct(a, u.members).forEach(({ p, v }) => { G.players[p].cash += v; }); log(G, `UTE ${u.name} reparte ${money(a)} en dividendos.`); break; }
     case 'dissolve': dissolve(G, u); break;
     default:
@@ -451,7 +472,7 @@ function evalVote(G, v) {
   else { pass = pctOf(v.yes) > 50; fail = pctOf(v.no) >= 50; }
   if (!pass && !fail) return;
   G.votes = G.votes.filter((x) => x.id !== v.id);
-  if (fail) { log(G, `UTE ${u.name}: rechazada la propuesta «${OP_TXT[v.op.k]}${v.op.sq != null ? ' ' + SQ[v.op.sq].n : ''}».`); return; }
+  if (fail) { log(G, `UTE ${u.name}: rechazada la propuesta «${OP_TXT[v.op.k]}${v.op.sq != null ? ' ' + sqOf(G, v.op.sq).n : ''}».`); return; }
   const e = uteOpErr(G, u, v.op);
   if (e) { log(G, `UTE ${u.name}: aprobada pero no se puede ejecutar (${e}).`); return; }
   uteOpRun(G, u, v.op);
@@ -459,7 +480,7 @@ function evalVote(G, v) {
 
 // ---------- construcción e hipotecas ----------
 export function buildErr(G, o, sq) {
-  const s = SQ[sq]; if (!s || s.t !== 'team') return 'Solo se mejoran franquicias';
+  const s = sqOf(G, sq); if (!s || s.t !== 'team') return 'Solo se mejoran franquicias';
   const pr = G.props[sq]; if (!pr || pr.o !== o) return 'No es tuya';
   const gs = groupSqs(s.g);
   if (!gs.every((j) => G.props[j]?.o === o)) return 'Necesitas el grupo completo';
@@ -476,14 +497,14 @@ export function buildErr(G, o, sq) {
 export function sellErr(G, o, sq) {
   const pr = G.props[sq]; if (!pr || pr.o !== o) return 'No es tuya';
   if (!pr.lvl) return 'No tiene mejoras';
-  const gs = groupSqs(SQ[sq].g);
+  const gs = groupSqs(sqOf(G, sq).g);
   if (G.settings.rules.evenBuild && pr.lvl < Math.max(...gs.map((j) => G.props[j]?.lvl || 0))) return 'Construcción pareja: vende antes en las otras del grupo';
   return null;
 }
 export function mortErr(G, o, sq) {
   const pr = G.props[sq]; if (!pr || pr.o !== o) return 'No es tuya';
   if (pr.mort) return 'Ya está hipotecada';
-  if (SQ[sq].t === 'team' && groupSqs(SQ[sq].g).some((j) => G.props[j]?.lvl > 0)) return 'Vende antes las mejoras del grupo';
+  if (sqOf(G, sq).t === 'team' && groupSqs(sqOf(G, sq).g).some((j) => G.props[j]?.lvl > 0)) return 'Vende antes las mejoras del grupo';
   return null;
 }
 
@@ -624,18 +645,18 @@ function execContract(G, kind, d) {
     case 'cession':
       pay(G, d.benef, d.owner, d.price);
       G.contracts.push({ id: G.nextId++, k: 'cession', owner: d.owner, benef: d.benef, sq: d.sq, pct: int(d.pct), end: int(d.rounds) ? G.round + int(d.rounds) - 1 : 0 });
-      log(G, `${n(d.owner)} cede a ${n(d.benef)} el ${int(d.pct)} % de los ingresos de ${SQ[d.sq].n}.`);
+      log(G, `${n(d.owner)} cede a ${n(d.benef)} el ${int(d.pct)} % de los ingresos de ${sqOf(G, d.sq).n}.`);
       return;
     case 'option':
       pay(G, d.holder, d.owner, d.premium);
       G.contracts.push({ id: G.nextId++, k: 'option', owner: d.owner, holder: d.holder, sq: d.sq, strike: int(d.strike), end: G.round + int(d.rounds) - 1 });
-      log(G, `${n(d.holder)} compra una opción sobre ${SQ[d.sq].n} a ${money(d.strike)}.`);
+      log(G, `${n(d.holder)} compra una opción sobre ${sqOf(G, d.sq).n} a ${money(d.strike)}.`);
       return;
     case 'installment':
       pay(G, d.buyer, d.seller, d.down);
       G.props[d.sq].o = pk(d.buyer);
       G.contracts.push({ id: G.nextId++, k: 'installment', seller: d.seller, buyer: d.buyer, sq: d.sq, per: int(d.per), left: int(d.n) });
-      log(G, `${n(d.buyer)} compra ${SQ[d.sq].n} a plazos a ${n(d.seller)}.`);
+      log(G, `${n(d.buyer)} compra ${sqOf(G, d.sq).n} a plazos a ${n(d.seller)}.`);
       return;
     default:
   }
@@ -659,7 +680,7 @@ function bankrupt(G, i) {
     if (cred === 'pot') G.pot += cash; else if (isU(cred)) credit(G, cred, cash);
     Object.keys(G.props).forEach((k) => { if (G.props[k].o === pk(i)) delete G.props[k]; });
     P.jailFree.forEach((s) => { const [dk, id] = s.split(':'); G.decks[dk].push(+id); });
-    log(G, `${P.name} quiebra. Sus franquicias vuelven a la liga.`);
+    log(G, `${P.name} quiebra. Sus ${V(G).ownWordPl} vuelven a la liga.`);
   }
   P.jailFree = [];
   G.utes.filter((u) => u.active).forEach((u) => {
@@ -692,7 +713,7 @@ function bankrupt(G, i) {
 function checkAuction(G) {
   const A = G.auction; if (!A) return;
   const act = alive(G).filter((j) => !A.out.includes(j));
-  const s = SQ[A.sq];
+  const s = sqOf(G, A.sq);
   if (A.lead !== null && act.every((j) => j === A.lead)) {
     const W = G.players[A.lead];
     if (W.bankrupt || W.cash < A.bid) { G.auction = null; G.phase = 'end'; return; }
@@ -735,6 +756,13 @@ function step(G, a) {
       if (P.length >= 6) return 'Sala llena';
       P.push(mkPlayer(a.player, P.length)); if (P.length === 1) G.host = a.player.id;
       return true;
+    }
+    case 'pick_team': {
+      if (G.status !== 'lobby') return 'La partida ya empezó';
+      const pl = P.find((x) => x.id === a.id); if (!pl) return 'No';
+      if (a.team && !NBA_TEAMS.some((t) => t[0] === a.team)) return 'No';
+      if (a.team && P.some((x) => x !== pl && x.team === a.team)) return 'Esa franquicia ya la ha cogido otro';
+      pl.team = a.team || null; return true;
     }
     case 'add_bot': {
       if (G.status !== 'lobby' || P.length >= 6) return 'Sala llena';
@@ -785,14 +813,14 @@ function step(G, a) {
       log(G, `${me.name} saca ${d[0]} y ${d[1]}${dbl ? ' (dobles)' : ''}.`);
       G.phase = 'end';
       if (me.inJail) {
-        if (dbl) { me.inJail = false; me.jailTries = 0; G.again = false; log(G, `${me.name} sale de la sanción con dobles.`); advance(G, by, sum); }
+        if (dbl) { me.inJail = false; me.jailTries = 0; G.again = false; log(G, `${me.name} sale de la ${V(G).jail} con dobles.`); advance(G, by, sum); }
         else {
           me.jailTries++;
           if (me.jailTries >= 3) {
-            charge(G, by, [{ to: bankTo(G), amt: 50 }], 'multa de sanción');
+            charge(G, by, [{ to: bankTo(G), amt: 50 }], 'salida de la ' + V(G).jail);
             me.inJail = false; me.jailTries = 0; G.again = false;
-            log(G, `${me.name} cumple la sanción: paga 50 y sale.`); advance(G, by, sum);
-          } else { G.again = false; log(G, `${me.name} sigue sancionado (intento ${me.jailTries} de 3).`); }
+            log(G, `${me.name} agota los intentos: paga 50 y sale de la ${V(G).jail}.`); advance(G, by, sum);
+          } else { G.again = false; log(G, `${me.name} sigue ${V(G).jailed} (intento ${me.jailTries} de 3).`); }
         }
         return true;
       }
@@ -804,16 +832,16 @@ function step(G, a) {
       if (!myTurn || G.phase !== 'roll' || !me.inJail) return 'No';
       if (me.cash < 50) return 'No tienes 50';
       me.cash -= 50; credit(G, bankTo(G), 50); me.inJail = false; me.jailTries = 0;
-      log(G, `${me.name} paga 50 y sale de la sanción.`); return true;
+      log(G, `${me.name} paga 50 y sale de la ${V(G).jail}.`); return true;
     }
     case 'jail_card': {
       if (!myTurn || G.phase !== 'roll' || !me.inJail || !me.jailFree.length) return 'No';
       const [dk, id] = me.jailFree.pop().split(':'); G.decks[dk].push(+id);
-      me.inJail = false; me.jailTries = 0; log(G, `${me.name} usa «Recurso aprobado» y sale de la sanción.`); return true;
+      me.inJail = false; me.jailTries = 0; log(G, `${me.name} usa «${G.settings.board === 'franquicia' ? 'Alta médica' : 'Recurso aprobado'}» y sale de la ${V(G).jail}.`); return true;
     }
     case 'buy': {
       if (!myTurn || G.phase !== 'buy' || !G.pending) return 'No';
-      const s = SQ[G.pending.sq];
+      const s = sqOf(G, G.pending.sq);
       if (me.cash < s.price) return 'No tienes dinero suficiente';
       me.cash -= s.price; G.props[s.i] = { o: pk(by), lvl: 0, mort: false };
       log(G, `${me.name} compra ${s.n} por ${money(s.price)}.`);
@@ -824,10 +852,10 @@ function step(G, a) {
       const sq = G.pending.sq; G.pending = null;
       if (G.settings.rules.auction) {
         G.auction = { sq, bid: 0, lead: null, out: [] }; G.phase = 'auction';
-        log(G, `${SQ[sq].n} sale a subasta.`);
+        log(G, `${sqOf(G, sq).n} sale a subasta.`);
         G.auction.out.push(...alive(G).filter((j) => P[j].cash < 1));
         checkAuction(G);
-      } else { G.phase = 'end'; log(G, `${me.name} no compra ${SQ[sq].n}.`); }
+      } else { G.phase = 'end'; log(G, `${me.name} no compra ${sqOf(G, sq).n}.`); }
       return true;
     }
     case 'bid': {
@@ -855,22 +883,22 @@ function step(G, a) {
       const e = buildErr(G, pk(by), a.sq); if (e) return e;
       const c = houseCost(a.sq); if (me.cash < c) return 'No tienes dinero suficiente';
       me.cash -= c; G.props[a.sq].lvl++;
-      log(G, `${me.name} mejora ${SQ[a.sq].n} (nivel ${G.props[a.sq].lvl}).`); return true;
+      log(G, `${me.name} mejora ${sqOf(G, a.sq).n} (nivel ${G.props[a.sq].lvl}).`); return true;
     }
     case 'sell': {
       const e = sellErr(G, pk(by), a.sq); if (e) return e;
       G.props[a.sq].lvl--; me.cash += Math.round(houseCost(a.sq) / 2);
-      log(G, `${me.name} vende una mejora de ${SQ[a.sq].n}.`); return true;
+      log(G, `${me.name} vende una mejora de ${sqOf(G, a.sq).n}.`); return true;
     }
     case 'mortgage': {
       const e = mortErr(G, pk(by), a.sq); if (e) return e;
       G.props[a.sq].mort = true; me.cash += mortValue(a.sq);
-      log(G, `${me.name} hipoteca ${SQ[a.sq].n} (+${money(mortValue(a.sq))}).`); return true;
+      log(G, `${me.name} hipoteca ${sqOf(G, a.sq).n} (+${money(mortValue(a.sq))}).`); return true;
     }
     case 'unmortgage': {
       const p = G.props[a.sq]; if (!p || p.o !== pk(by) || !p.mort) return 'No está hipotecada';
       const c = unmortCost(a.sq); if (me.cash < c) return 'No tienes dinero suficiente';
-      me.cash -= c; p.mort = false; log(G, `${me.name} levanta la hipoteca de ${SQ[a.sq].n}.`); return true;
+      me.cash -= c; p.mort = false; log(G, `${me.name} levanta la hipoteca de ${sqOf(G, a.sq).n}.`); return true;
     }
     // ----- deudas -----
     case 'pay_debt': {
@@ -908,6 +936,7 @@ function step(G, a) {
       if (!parties.includes(by)) return 'Tienes que ser parte del contrato';
       const e = contractErr(G, a.kind, a.data); if (e) return e;
       const pr = { id: G.nextId++, kind: a.kind, by, parties, signed: [by], data: a.data, r: G.round };
+      if (a.ask) { G.botAsk = G.botAsk || {}; G.botAsk[a.ask] = G.round; }
       G.proposals.push(pr);
       log(G, `${me.name} propone un contrato: ${a.kind === 'ute' ? 'UTE ' + a.data.name : a.kind}.`);
       return true;
@@ -942,7 +971,7 @@ function step(G, a) {
       if (me.cash < c.strike) return 'No tienes suficiente';
       pay(G, by, c.owner, c.strike); G.props[c.sq].o = pk(by);
       G.contracts = G.contracts.filter((x) => x !== c);
-      log(G, `${me.name} ejecuta su opción y compra ${SQ[c.sq].n} por ${money(c.strike)}.`); return true;
+      log(G, `${me.name} ejecuta su opción y compra ${sqOf(G, c.sq).n} por ${money(c.strike)}.`); return true;
     }
     case 'release': {
       const c = G.contracts.find((x) => x.id === a.id); if (!c) return 'No';
@@ -960,7 +989,7 @@ function step(G, a) {
       if (G.votes.some((v) => v.uid === u.id && v.op.k === a.op.k && v.op.sq === a.op.sq)) return 'Ya hay una votación igual abierta';
       const v = { id: G.nextId++, uid: u.id, op: { k: a.op.k, sq: a.op.sq ?? null, amt: a.op.amt ?? null }, by, yes: [by], no: [] };
       G.votes.push(v);
-      log(G, `${me.name} propone en la UTE ${u.name}: ${OP_TXT[a.op.k]}${a.op.sq != null ? ' ' + SQ[a.op.sq].n : ''}${a.op.amt ? ' ' + money(a.op.amt) : ''}.`);
+      log(G, `${me.name} propone en la UTE ${u.name}: ${OP_TXT[a.op.k]}${a.op.sq != null ? ' ' + sqOf(G, a.op.sq).n : ''}${a.op.amt ? ' ' + money(a.op.amt) : ''}.`);
       evalVote(G, v); return true;
     }
     case 'ute_vote': {

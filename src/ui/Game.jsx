@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { SQ, GROUPS, BUILD_SETS, groupSqs } from '../game/data.js';
-import { pk, isP, isU, oNum, getUte, rentOf, houseCost, mortValue, unmortCost, netWorth, money, rank, entName, buildErr, sellErr, mortErr, uteOpErr, OP_TXT, lockOf, contractTitle } from '../game/engine.js';
+import { GROUPS, groupSqs, sqOf, groupName, buildSet, boardOf, teamName, NBA_TEAMS, SCORE } from '../game/data.js';
+import { pk, isP, isU, oNum, getUte, rentOf, houseCost, mortValue, unmortCost, netWorth, scoreOf, bonusOf, money, rank, entName, buildErr, sellErr, mortErr, uteOpErr, OP_TXT, lockOf, contractTitle } from '../game/engine.js';
 import Board, { CourtCenter } from './Board.jsx';
 import { M, Sheet, Stepper, Dot, PropTag } from './common.jsx';
 import ContractsTab, { ContractEditor } from './Contracts.jsx';
@@ -46,7 +46,7 @@ export default function Game({ ctx, onExit, roomCode }) {
       )}
 
       <nav className="tabs" aria-label="Secciones">
-        {[['mio', 'Mis franquicias'], ['contratos', `Contratos${badge(G, ctx)}`], ['log', 'Jugadas']].map(([k, l]) => (
+        {[['mio', `Mis ${boardOf(G.settings).ownWordPl}`], ['contratos', `Contratos${badge(G, ctx)}`], ['log', 'Jugadas']].map(([k, l]) => (
           <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>
         ))}
       </nav>
@@ -73,9 +73,10 @@ function Scoreboard({ G }) {
     <div className="score" role="list">
       {G.players.map((p, i) => (
         <div key={i} role="listitem" className={'sc' + (i === G.turn ? ' on' : '') + (p.bankrupt ? ' out' : '')} style={{ '--p': p.col }}>
-          <span className="nm">{p.name}{p.bot ? ' 🤖' : ''}{p.away ? ' (ausente)' : ''}{p.inJail ? ' · sancionado' : ''}</span>
+          <span className="nm">{p.name}{p.bot ? ' 🤖' : ''}{p.away ? ' (ausente)' : ''}{p.inJail ? ` · ${boardOf(G.settings).jailed}` : ''}</span>
           <b className="cash">{p.bankrupt ? 'Quiebra' : money(p.cash)}</b>
-          {!p.bankrupt && <small>Patrimonio {money(netWorth(G, i))}</small>}
+          {p.team && <small className="team">{teamName(p.team)}</small>}
+          {!p.bankrupt && <small>{G.settings.board === 'franquicia' ? 'Valoración' : 'Patrimonio'} {money(scoreOf(G, i))}</small>}
         </div>
       ))}
     </div>
@@ -139,13 +140,13 @@ function Dock({ ctx, openProp, goMine }) {
             </div>
           );
         })}
-        <p className="hint">También puedes pedir un préstamo o vender franquicias con un contrato.</p>
+        <p className="hint">También puedes pedir un préstamo o vender {boardOf(G.settings).ownWordPl} con un contrato.</p>
       </section>
     );
   }
 
   if (G.auction) {
-    const A = G.auction; const s = SQ[A.sq];
+    const A = G.auction; const s = sqOf(G, A.sq);
     const bidders = G.players.map((p, i) => i).filter((i) => ctx.can(i) && !G.players[i].bankrupt && !A.out.includes(i));
     return (
       <section className="dock auction" style={{ '--c': s.g ? GROUPS[s.g].c : '#ccc' }}>
@@ -181,7 +182,7 @@ function Dock({ ctx, openProp, goMine }) {
       <section className="dock">
         {P.inJail ? (
           <>
-            <p>Estás sancionado. Saca dobles para salir (intento {P.jailTries + 1} de 3), paga 50 o usa una carta.</p>
+            <p>Estás {boardOf(G.settings).jailed}. Saca dobles para salir (intento {P.jailTries + 1} de 3), paga 50 o usa una carta.</p>
             <div className="row3">
               <button className="cta" onClick={() => dispatch({ t: 'roll', by: t })}>Tirar dados</button>
               <button className="btn" disabled={P.cash < 50} onClick={() => dispatch({ t: 'jail_pay', by: t })}>Pagar 50</button>
@@ -193,15 +194,15 @@ function Dock({ ctx, openProp, goMine }) {
     );
   }
   if (G.phase === 'buy' && G.pending) {
-    const s = SQ[G.pending.sq];
+    const s = sqOf(G, G.pending.sq);
     return (
       <section className="dock buy" style={{ '--c': s.g ? GROUPS[s.g].c : '#c9ced8' }}>
-        <button className="buyhead" onClick={() => openProp(s.i)}><i className="sw" /><span><b>{s.t === 'team' ? `${s.city} ${s.n}` : s.n}</b><small>Libre · ver ficha</small></span><M v={s.price} /></button>
+        <button className="buyhead" onClick={() => openProp(s.i)}><i className="sw" /><span><b>{s.t === 'team' && s.city ? `${s.city} ${s.n}` : s.n}</b><small>{s.sub ? `${s.sub} · ` : ''}Libre · ver ficha</small></span><M v={s.price} /></button>
         <div className="row2">
           <button className="cta" disabled={P.cash < s.price} onClick={() => dispatch({ t: 'buy', by: t })}>Comprar</button>
           <button className="btn" onClick={() => dispatch({ t: 'decline', by: t })}>{G.settings.rules.auction ? 'Subastar' : 'No comprar'}</button>
         </div>
-        {P.cash < s.price && <p className="hint">No te llega: hipoteca algo en «Mis franquicias» o pide un préstamo.</p>}
+        {P.cash < s.price && <p className="hint">No te llega: hipoteca algo en «Mis {boardOf(G.settings).ownWordPl}» o pide un préstamo.</p>}
       </section>
     );
   }
@@ -219,7 +220,7 @@ function Dock({ ctx, openProp, goMine }) {
 // ---------- ficha de franquicia ----------
 function PropSheet({ ctx, sq, onClose }) {
   const { G, dispatch } = ctx;
-  const s = SQ[sq]; const p = G.props[sq]; const bs = BUILD_SETS[G.settings.build];
+  const s = sqOf(G, sq); const p = G.props[sq]; const bs = buildSet(G.settings);
   const col = s.g ? GROUPS[s.g].c : '#c9ced8';
   const actor = ctx.actor;
   const u = p && isU(p.o) ? getUte(G, oNum(p.o)) : null;
@@ -248,7 +249,8 @@ function PropSheet({ ctx, sq, onClose }) {
   };
 
   return (
-    <Sheet onClose={onClose} title={s.t === 'team' ? `${s.city} ${s.n}` : s.n} color={col}>
+    <Sheet onClose={onClose} title={s.t === 'team' && s.city ? `${s.city} ${s.n}` : s.n} color={col}>
+      {s.sub && <p className="hint">{s.sub}</p>}
       {s.price ? (
         <>
           <dl className="facts">
@@ -256,13 +258,13 @@ function PropSheet({ ctx, sq, onClose }) {
             <dt>Dueño</dt><dd>{p ? entName(G, p.o) : 'Libre'}</dd>
             {p && <><dt>Estado</dt><dd>{p.mort ? 'Hipotecada' : s.t === 'team' ? bs.lv[p.lvl] : 'Activa'}</dd></>}
             <dt>Hipoteca</dt><dd>{money(mortValue(sq))} (levantar: {money(unmortCost(sq))})</dd>
-            {s.t === 'team' && <><dt>Cada mejora</dt><dd>{money(houseCost(sq))}</dd></>}
+            {s.t === 'team' && <><dt>{G.settings.board === 'franquicia' ? 'Cada progresión' : 'Cada mejora'}</dt><dd>{money(houseCost(sq))}</dd></>}
             {p && <><dt>Cobra ahora</dt><dd>{s.t === 'util' ? (rentOf(G, sq, 1) === 10 ? '10 × dados' : '4 × dados') : money(rentOf(G, sq))}</dd></>}
           </dl>
           {s.t === 'team' && (
             <table className="rent">
               <tbody>
-                <tr><td>Solo la franquicia</td><td>{money(s.rent[0])}</td></tr>
+                <tr><td>Solo {G.settings.board === 'franquicia' ? 'el jugador' : 'la franquicia'}</td><td>{money(s.rent[0])}</td></tr>
                 <tr><td>Con el grupo completo</td><td>{money(s.rent[0] * 2)}</td></tr>
                 {[1, 2, 3, 4, 5].map((l) => <tr key={l} className={p?.lvl === l ? 'on' : ''}><td>{l}. {bs.lv[l]}</td><td>{money(s.rent[l])}</td></tr>)}
               </tbody>
@@ -270,7 +272,7 @@ function PropSheet({ ctx, sq, onClose }) {
           )}
           {s.t === 'tv' && <p className="note">Cobra 25 con un canal, 50 con dos, 100 con tres y 200 con los cuatro.</p>}
           {s.t === 'util' && <p className="note">Cobra 4 veces los dados con un patrocinio, 10 veces con los dos.</p>}
-          {s.t === 'team' && <p className="hint">Grupo {GROUPS[s.g].n}: {groupSqs(s.g).map((j) => SQ[j].n).join(', ')}.</p>}
+          {s.t === 'team' && <p className="hint">Grupo {groupName(G, s.g)}: {groupSqs(s.g).map((j) => sqOf(G, j).n).join(', ')}.</p>}
           {lock && <p className="note">Bloqueada por un contrato: {lock.k === 'loan' ? 'es aval de un préstamo' : contractTitle(G, lock)}.</p>}
           {cessions.map((c) => <p key={c.id} className="note">{G.players[c.benef].name} cobra el {c.pct} % de sus alquileres.</p>)}
           {u && <p className="note">Es de la UTE {u.name} ({u.members.map((m) => `${G.players[m.p].name} ${m.pct}%`).join(', ')}). {u.gov === 'gestor' ? `Decide ${G.players[u.gestor]?.name}.` : u.gov === 'mayoria' ? 'Se decide por mayoría.' : 'Se decide por unanimidad.'}</p>}
@@ -291,9 +293,9 @@ function SpecialInfo({ s, G }) {
   const r = G.settings.rules;
   const txt = {
     go: `Cada vez que pasas cobras ${money(G.settings.salary)}${r.doubleGo ? '; si caes justo aquí, el doble' : ''}.`,
-    jail: 'Si solo pasas, estás de visita. Sancionado: sales sacando dobles (3 intentos), pagando 50 o con «Recurso aprobado».',
+    jail: `Si solo pasas, estás de visita. Si te mandan aquí, sales sacando dobles (3 intentos), pagando 50 o con la carta «${G.settings.board === 'franquicia' ? 'Alta médica' : 'Recurso aprobado'}».`,
     pot: r.pot ? `Quien cae aquí se lleva el bote de multas. Ahora hay ${money(G.pot)}.` : 'Descanso: no pasa nada.',
-    gojail: 'Vas directo a la sanción sin pasar por el Draft.',
+    gojail: `Vas directo a la ${boardOf(G.settings).jail} sin pasar por ${sqOf(G, 0).n}.`,
     td: 'Roba una carta de Trade Deadline: movimientos, cobros y pagos.',
     fo: 'Roba una carta de Front Office: casi siempre dinero.',
     tax: `Pagas ${money(s.v)}${r.pot ? ' al bote del All-Star' : ' a la liga'}.`,
@@ -309,16 +311,16 @@ function Mine({ ctx, openProp }) {
   const mine = Object.keys(G.props).map(Number).filter((k) => G.props[k].o === pk(i)).sort((a, b) => a - b);
   const utes = G.utes.filter((u) => u.active && u.members.some((m) => m.p === i));
   const byG = {};
-  mine.forEach((sq) => { const g = SQ[sq].g || SQ[sq].t; (byG[g] = byG[g] || []).push(sq); });
+  mine.forEach((sq) => { const g = sqOf(G, sq).g || sqOf(G, sq).t; (byG[g] = byG[g] || []).push(sq); });
   return (
     <section className="mine">
-      <div className="mehead"><Dot col={P.col} size={14} /><b>{P.name}</b><span><M v={P.cash} /> en caja · patrimonio {money(netWorth(G, i))}{P.jailFree.length ? ` · ${P.jailFree.length} recurso${P.jailFree.length > 1 ? 's' : ''}` : ''}</span></div>
-      {!mine.length && <p className="hint">Aún no tienes franquicias. Cae en una libre para comprarla.</p>}
+      <div className="mehead"><Dot col={P.col} size={14} /><b>{P.name}</b><span>{P.team ? `${teamName(P.team)} · ` : ''}<M v={P.cash} /> en caja · {G.settings.board === 'franquicia' ? `valoración ${money(scoreOf(G, i))} (${bonusOf(G, i).groups} grupos, ${bonusOf(G, i).rings} anillos)` : `patrimonio ${money(netWorth(G, i))}`}{P.jailFree.length ? ` · ${P.jailFree.length} recurso${P.jailFree.length > 1 ? 's' : ''}` : ''}</span></div>
+      {!mine.length && <p className="hint">Aún no tienes {boardOf(G.settings).ownWordPl}. Cae en una casilla libre para comprarla.</p>}
       {Object.entries(byG).map(([g, sqs]) => {
         const full = GROUPS[g] && groupSqs(g).every((j) => G.props[j]?.o === pk(i));
         return (
           <div key={g} className="grp">
-            <span className="glabel">{GROUPS[g]?.n || (g === 'tv' ? 'Derechos de TV' : 'Patrocinios')}{full ? ' · grupo completo' : GROUPS[g] ? ` · ${sqs.length} de ${groupSqs(g).length}` : ''}</span>
+            <span className="glabel">{groupName(G, g) || (g === 'tv' ? boardOf(G.settings).tvName : boardOf(G.settings).utilName)}{full ? ' · grupo completo' : GROUPS[g] ? ` · ${sqs.length} de ${groupSqs(g).length}` : ''}</span>
             <div className="ptags">{sqs.map((sq) => <PropTag key={sq} sq={sq} G={G} onClick={() => openProp(sq)} />)}</div>
           </div>
         );
@@ -332,7 +334,7 @@ function Mine({ ctx, openProp }) {
           </div>
         );
       })}
-      <p className="hint">Toca una franquicia para mejorarla, hipotecarla o ver sus alquileres.</p>
+      <p className="hint">Toca una casilla para mejorarla, hipotecarla o ver lo que cobra.</p>
     </section>
   );
 }
@@ -359,9 +361,9 @@ export function EndScreen({ G, onRematch, onHome }) {
   return (
     <div className="app end">
       <h1 className="logo">Franquicia</h1>
-      <div className="winner"><small>Campeón</small><h2 style={{ color: r[0].p.col }}>{r[0].p.name}</h2><p>Patrimonio {money(r[0].w)} en {G.round} rondas</p></div>
+      <div className="winner"><small>Campeón</small><h2 style={{ color: r[0].p.col }}>{r[0].p.name}</h2><p>{r[0].p.team ? `${teamName(r[0].p.team)} · ` : ''}{G.settings.board === 'franquicia' ? 'Valoración' : 'Patrimonio'} {money(r[0].w)} en {G.round} rondas</p></div>
       <ol className="rank">
-        {r.map((x, k) => <li key={x.i}><span className="pos">{k + 1}</span><Dot col={x.p.col} /><b>{x.p.name}</b><span>{x.p.bankrupt ? 'Quiebra' : money(x.w)}</span></li>)}
+        {r.map((x, k) => <li key={x.i}><span className="pos">{k + 1}</span><Dot col={x.p.col} /><b>{x.p.name}{x.p.team ? ` · ${teamName(x.p.team)}` : ''}</b><span>{x.p.bankrupt ? 'Quiebra' : money(x.w)}</span></li>)}
       </ol>
       {onRematch && <button className="cta" onClick={onRematch}>Revancha</button>}
       <button className="btn" onClick={onHome}>Volver al inicio</button>

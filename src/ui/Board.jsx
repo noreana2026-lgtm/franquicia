@@ -1,5 +1,5 @@
 import React from 'react';
-import { SQ, GROUPS, BUILD_SETS, CARDS } from '../game/data.js';
+import { GROUPS, boardSQ, boardOf, buildSet, cardOf, sqOf } from '../game/data.js';
 import { isP, isU, oNum, getUte } from '../game/engine.js';
 import { Die } from './common.jsx';
 
@@ -11,7 +11,6 @@ export function cellPos(i) {
 }
 const side = (i) => (i < 10 ? 'b' : i < 20 ? 'l' : i < 30 ? 't' : 'r');
 
-const ICON = { go: 'DRAFT', jail: 'SANCIÓN', pot: 'ALL-STAR', gojail: 'EXPULSADO', td: 'TRADE', fo: 'FRONT', tax: 'MULTA' };
 
 export function ownerColor(G, o) {
   if (isP(o)) return G.players[oNum(o)]?.col;
@@ -20,10 +19,10 @@ export function ownerColor(G, o) {
 }
 
 export default function Board({ G, onTile, center, hi }) {
-  const bs = BUILD_SETS[G.settings.build];
+  const bs = buildSet(G.settings); void sqOf;
   return (
     <div className="board" role="grid" aria-label="Tablero">
-      {SQ.map((s) => {
+      {boardSQ(G.settings.board).map((s) => {
         const [r, c] = cellPos(s.i);
         const p = G.props?.[s.i];
         const toks = (G.players || []).map((pl, k) => ({ pl, k })).filter(({ pl }) => !pl.bankrupt && pl.pos === s.i);
@@ -34,7 +33,7 @@ export default function Board({ G, onTile, center, hi }) {
           <button key={s.i} type="button" className={cls} style={{ gridRow: r, gridColumn: c, '--g': s.g ? GROUPS[s.g].c : 'transparent' }}
             onClick={() => onTile?.(s.i)} aria-label={`${s.n}${p ? ', con dueño' : ''}`}>
             {s.g && <i className="strip" />}
-            <span className="ab">{s.ab || ICON[s.t] || ''}</span>
+            <span className="ab">{s.ab || boardOf(G.settings).icon[s.t] || ''}</span>
             {s.t === 'team' && <span className="pr">{p?.lvl ? (p.lvl === 5 ? '★' : '•'.repeat(p.lvl)) : s.price}</span>}
             {(s.t === 'tv' || s.t === 'util') && <span className="pr">{s.price}</span>}
             {corner && s.t === 'pot' && G.settings.rules.pot && <span className="cs">{G.pot}</span>}
@@ -52,7 +51,7 @@ export default function Board({ G, onTile, center, hi }) {
 
 export function CourtCenter({ G, rolling }) {
   const P = G.players[G.turn];
-  const card = G.card ? CARDS[G.card.deck][G.card.id] : null;
+  const card = G.card ? cardOf(G.settings, G.card.deck, G.card.id) : null;
   const last = G.log?.[G.log.length - 1]?.t;
   return (
     <div className="cc">
