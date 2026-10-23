@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { GROUPS, boardSQ, boardOf, buildSet, cardOf, sqOf } from '../game/data.js';
 import { isP, isU, oNum, getUte } from '../game/engine.js';
 import { Die } from './common.jsx';
@@ -18,14 +18,41 @@ export function ownerColor(G, o) {
   return null;
 }
 
+const RM = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Posiciones que se ven: las fichas avanzan casilla a casilla hasta la posición real.
+function useShownPositions(G) {
+  const real = (G.players || []).map((p) => p.pos);
+  const [shown, setShown] = useState(real);
+  const ref = useRef(real); ref.current = shown;
+  const key = real.join(',');
+  useEffect(() => {
+    const target = (G.players || []).map((p) => p.pos);
+    const jail = (G.players || []).map((p) => p.inJail);
+    let cur = ref.current.length === target.length ? [...ref.current] : [...target];
+    // saltos (sanción, cartas hacia atrás, recorridos largos): directos
+    cur = cur.map((c, i) => { const d = (target[i] - c + 40) % 40; return (RM || d > 12 || (jail[i] && target[i] === 10)) ? target[i] : c; });
+    setShown(cur);
+    if (cur.every((c, i) => c === target[i])) return undefined;
+    const iv = setInterval(() => {
+      cur = cur.map((c, i) => (c === target[i] ? c : (c + 1) % 40));
+      setShown([...cur]);
+      if (cur.every((c, i) => c === target[i])) clearInterval(iv);
+    }, 110);
+    return () => clearInterval(iv);
+  }, [key]);
+  return shown;
+}
+
 export default function Board({ G, onTile, center, hi }) {
   const bs = buildSet(G.settings); void sqOf;
+  const shown = useShownPositions(G);
   return (
     <div className="board" role="grid" aria-label="Tablero">
       {boardSQ(G.settings.board).map((s) => {
         const [r, c] = cellPos(s.i);
         const p = G.props?.[s.i];
-        const toks = (G.players || []).map((pl, k) => ({ pl, k })).filter(({ pl }) => !pl.bankrupt && pl.pos === s.i);
+        const toks = (G.players || []).map((pl, k) => ({ pl, k })).filter(({ pl, k }) => !pl.bankrupt && (shown[k] ?? pl.pos) === s.i);
         const corner = s.i % 10 === 0;
         const own = p ? ownerColor(G, p.o) : null;
         const cls = ['cell', 's-' + side(s.i), 't-' + s.t, corner ? 'corner' : '', p?.mort ? 'mort' : '', hi === s.i ? 'hi' : '', G.turn != null && G.players?.[G.turn]?.pos === s.i ? 'cur' : ''].join(' ');

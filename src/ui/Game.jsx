@@ -28,13 +28,14 @@ export default function Game({ ctx, onExit, roomCode }) {
         </div>
       </header>
 
-      <Scoreboard G={G} />
+      <Scoreboard G={G} onPick={(i) => setSheet({ k: 'player', i })} />
       <Alerts ctx={ctx} goContracts={() => setTab('contratos')} />
 
       <Board G={G} onTile={(sq) => setSheet({ k: 'prop', sq })} hi={G.pending?.sq ?? G.auction?.sq}
         center={<CourtCenter G={G} rolling={rolling} />} />
 
       <Dock ctx={ctx} openProp={(sq) => setSheet({ k: 'prop', sq })} goMine={() => setTab('mio')} />
+      <Feed G={G} onMore={() => setTab('log')} />
 
       {ctx.local && humans.length > 1 && (tab === 'mio' || tab === 'contratos') && (
         <div className="actor">
@@ -55,6 +56,7 @@ export default function Game({ ctx, onExit, roomCode }) {
       {tab === 'log' && !ctx.local && ctx.isHost && <AwayTools ctx={ctx} />}
       {tab === 'log' && <Log G={G} />}
 
+      {sheet?.k === 'player' && <PlayerSheet ctx={ctx} i={sheet.i} onClose={() => setSheet(null)} openProp={(sq) => setSheet({ k: 'prop', sq })} propose={(other) => setSheet({ k: 'contract', preset: { other } })} />}
       {sheet?.k === 'prop' && <PropSheet ctx={ctx} sq={sheet.sq} onClose={() => setSheet(null)} />}
       {sheet?.k === 'rules' && <Sheet title="Reglas" onClose={() => setSheet(null)}><Rules settings={G.settings} focus={sheet.sec} /></Sheet>}
       {sheet?.k === 'contract' && <ContractEditor ctx={ctx} preset={sheet.preset} onClose={() => setSheet(null)} onDone={() => { setSheet(null); setTab('contratos'); }} />}
@@ -68,16 +70,17 @@ function badge(G, ctx) {
   return n ? ` (${n})` : '';
 }
 
-function Scoreboard({ G }) {
+function Scoreboard({ G, onPick }) {
   return (
     <div className="score" role="list">
       {G.players.map((p, i) => (
-        <div key={i} role="listitem" className={'sc' + (i === G.turn ? ' on' : '') + (p.bankrupt ? ' out' : '')} style={{ '--p': p.col }}>
+        <button type="button" key={i} role="listitem" className={'sc' + (i === G.turn ? ' on' : '') + (p.bankrupt ? ' out' : '')} style={{ '--p': p.col }} onClick={() => onPick(i)} aria-label={`Ver a ${p.name}`}>
           <span className="nm">{p.name}{p.bot ? ' 🤖' : ''}{p.away ? ' (ausente)' : ''}{p.inJail ? ` · ${boardOf(G.settings).jailed}` : ''}</span>
           <b className="cash">{p.bankrupt ? 'Quiebra' : money(p.cash)}</b>
           {p.team && <small className="team">{teamName(p.team)}</small>}
           {!p.bankrupt && <small>{G.settings.board === 'franquicia' ? 'Valoración' : 'Patrimonio'} {money(scoreOf(G, i))}</small>}
-        </div>
+          {!p.bankrupt && <small className="pc">{Object.values(G.props).filter((x) => x.o === pk(i)).length} {boardOf(G.settings).ownWordPl} · ver</small>}
+        </button>
       ))}
     </div>
   );
@@ -348,6 +351,52 @@ function AwayTools({ ctx }) {
       <p className="hint">Si alguien se ha quedado sin conexión, pásalo a piloto automático para que la partida siga. Vuelve cuando él quiera.</p>
       <div className="chips" style={{ marginTop: 6 }}>{list.map(({ p, i }) => <button key={i} className="chip" onClick={() => dispatch({ t: 'set_away', by: ctx.actor, target: i })}><Dot col={p.col} />{p.name}: automático</button>)}</div>
     </div>
+  );
+}
+
+function Feed({ G, onMore }) {
+  const items = G.log.filter((l) => !l.t.startsWith('—')).slice(-4).reverse();
+  if (!items.length) return null;
+  return (
+    <button type="button" className="feed" onClick={onMore} aria-label="Ver todas las jugadas">
+      {items.map((l, k) => <span key={G.log.length - k} className={k === 0 ? 'new' : ''}>{l.t}</span>)}
+    </button>
+  );
+}
+
+function PlayerSheet({ ctx, i, onClose, openProp, propose }) {
+  const { G } = ctx; const P = G.players[i]; const W = boardOf(G.settings);
+  const mine = Object.keys(G.props).map(Number).filter((k) => G.props[k].o === pk(i)).sort((a, b) => a - b);
+  const byG = {};
+  mine.forEach((sq) => { const g = sqOf(G, sq).g || sqOf(G, sq).t; (byG[g] = byG[g] || []).push(sq); });
+  const utes = G.utes.filter((u) => u.active && u.members.some((m) => m.p === i));
+  const cons = G.contracts.filter((c) => [c.lender, c.borrower, c.owner, c.tenant, c.benef, c.holder, c.seller, c.buyer].includes(i));
+  const debts = G.debts.filter((d) => d.p === i);
+  const b = bonusOf(G, i);
+  const canPropose = G.settings.contracts && ctx.actor != null && ctx.actor !== i && !P.bankrupt && !G.players[ctx.actor]?.bankrupt;
+  return (
+    <Sheet title={P.name} color={P.col} onClose={onClose}>
+      <p className="hint">{P.team ? `${teamName(P.team)} · ` : ''}{P.bot ? 'Bot · ' : ''}{P.away ? 'Ausente (piloto automático) · ' : ''}{P.bankrupt ? 'En quiebra' : `Está en ${sqOf(G, P.pos).n}${P.inJail ? ` (${W.jailed})` : ''}`}</p>
+      {!P.bankrupt && (
+        <dl className="facts">
+          <dt>Dinero</dt><dd>{money(P.cash)}</dd>
+          <dt>Patrimonio</dt><dd>{money(netWorth(G, i))}</dd>
+          {G.settings.board === 'franquicia' && <><dt>Palmarés</dt><dd>{b.groups} grupos · {b.rings} anillos (+{money(b.v)})</dd><dt>Valoración</dt><dd>{money(scoreOf(G, i))}</dd></>}
+          {P.jailFree.length > 0 && <><dt>Cartas para salir</dt><dd>{P.jailFree.length}</dd></>}
+          {debts.length > 0 && <><dt>Debe</dt><dd>{money(debts.reduce((a, d) => a + d.amt, 0))}</dd></>}
+        </dl>
+      )}
+      {!mine.length && !P.bankrupt && <p className="hint">Aún no tiene {W.ownWordPl}.</p>}
+      {Object.entries(byG).map(([g, sqs]) => (
+        <div key={g} className="grp">
+          <span className="glabel">{groupName(G, g) || (g === 'tv' ? W.tvName : W.utilName)}{GROUPS[g] ? (groupSqs(g).every((j) => G.props[j]?.o === pk(i)) ? ' · grupo completo' : ` · ${sqs.length} de ${groupSqs(g).length}`) : ''}</span>
+          <div className="ptags">{sqs.map((sq) => <PropTag key={sq} sq={sq} G={G} onClick={() => openProp(sq)} />)}</div>
+        </div>
+      ))}
+      {utes.map((u) => <p key={u.id} className="note">Socio de la UTE {u.name} con un {u.members.find((m) => m.p === i).pct} %.</p>)}
+      {cons.map((c) => <p key={c.id} className="note">{contractTitle(G, c)}</p>)}
+      {canPropose && <button className="cta" onClick={() => propose(i)}>Proponerle un contrato</button>}
+    </Sheet>
   );
 }
 

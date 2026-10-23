@@ -56,17 +56,35 @@ function useOnlineRoom(code, toast) {
   return { room, dispatch, err };
 }
 
-// Ejecuta bots y piloto automático. En online solo lo hace el anfitrión para no duplicar jugadas.
-function useAutoplay(G, dispatch, enabled) {
-  const busy = useRef(false);
+// Ejecuta bots y piloto automático en bucle. En online lo hace el anfitrión; si su móvil se queda
+// dormido, cualquier otro jugador toma el relevo cuando la sala lleva unos segundos sin moverse.
+const BOT_DELAY = { roll: 1100, end_turn: 900, buy: 1000, decline: 1000, build: 700, bid: 650, fold: 650 };
+function useAutoplay(G, dispatch, enabled, backup = false) {
+  const st = useRef({ G: null, inflight: false, seq: -1, changed: Date.now() });
+  st.current.G = G;
+  if (G && G.seq !== st.current.seq) { st.current.seq = G.seq; st.current.changed = Date.now(); }
   useEffect(() => {
-    if (!enabled || !G || G.status !== 'playing') return undefined;
-    const a = nextAutoAction(G);
-    if (!a || busy.current) return undefined;
-    const slow = ['roll', 'end_turn', 'buy', 'decline'].includes(a.t);
-    const t = setTimeout(async () => { busy.current = true; try { await dispatch(a, true); } finally { busy.current = false; } }, slow ? 900 : 450);
-    return () => clearTimeout(t);
-  }, [G?.seq, enabled]);
+    if (!enabled) return undefined;
+    let dead = false; let timer = null;
+    const loop = () => {
+      if (dead) return;
+      const g = st.current.G;
+      const a = g && g.status === 'playing' ? nextAutoAction(g) : null;
+      const stale = Date.now() - st.current.changed > 7000;
+      if (!a || st.current.inflight || (backup && !stale)) { timer = setTimeout(loop, 350); return; }
+      timer = setTimeout(async () => {
+        if (dead) return;
+        const g2 = st.current.G; const a2 = g2 && g2.status === 'playing' ? nextAutoAction(g2) : null;
+        if (a2 && !st.current.inflight) {
+          st.current.inflight = true;
+          try { await dispatch(a2, true); } catch { /* reintenta en la siguiente vuelta */ } finally { st.current.inflight = false; }
+        }
+        loop();
+      }, BOT_DELAY[a.t] || 600);
+    };
+    loop();
+    return () => { dead = true; clearTimeout(timer); };
+  }, [enabled, dispatch, backup]);
 }
 
 export default function App() {
@@ -109,7 +127,7 @@ export default function App() {
   const onlineMyIdx = G ? G.players.findIndex((p) => p.id === myId) : -1;
   const hostHere = G && G.players.find((p) => p.id === G.host)?.id === myId;
   useAutoplay(localG && screen === 'local' ? localG : null, localDispatch, screen === 'local');
-  useAutoplay(screen === 'room' ? G : null, onlineDispatch, screen === 'room' && !!hostHere);
+  useAutoplay(screen === 'room' ? G : null, onlineDispatch, screen === 'room' && onlineMyIdx >= 0, !hostHere);
 
   // En local, gestionar por defecto como el jugador humano que tiene el turno.
   useEffect(() => {

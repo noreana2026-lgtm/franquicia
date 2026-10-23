@@ -158,13 +158,14 @@ function initData(kind, me, other) {
   }
 }
 
-export function ContractEditor({ ctx, onClose, onDone }) {
+export function ContractEditor({ ctx, onClose, onDone, preset }) {
   const { G, dispatch } = ctx;
   const me = ctx.actor;
   const others = G.players.map((p, i) => i).filter((i) => i !== me && !G.players[i].bankrupt);
   const [kind, setKind] = useState(null);
   const [d, setD] = useState(null);
-  const pickKind = (k) => { setKind(k); setD(initData(k, me, others[0])); };
+  const firstOther = preset?.other != null && others.includes(preset.other) ? preset.other : others[0];
+  const pickKind = (k) => { setKind(k); setD(initData(k, me, firstOther)); };
   const set = (patch) => setD((x) => ({ ...x, ...patch }));
   const err = useMemo(() => (kind && d ? contractErr(G, kind, d) : null), [G, kind, d]);
 
